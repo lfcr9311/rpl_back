@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Query } from '@nestjs/common'
-import { NotamsService } from 'src/service/notam.service'
+import { NotamsService } from '../service/notam.service'
 
 @Controller('notams')
 export class NotamsController {

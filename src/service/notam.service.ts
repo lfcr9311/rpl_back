@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { XMLParser } from 'fast-xml-parser'
 import { readFile } from 'node:fs/promises'
 import * as XLSX from 'xlsx'
-import { EnvService } from 'src/config/env.service'
+import { EnvService } from '../config/env.service'
 import {
   AeroviaLinhaModel,
   AeroviasResponseModel,

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import type { AiswebItemModel, LatLon } from 'src/models/notams/aisweb-response.model'
+import type { AiswebItemModel, LatLon } from '../models/notams/aisweb-response.model'
 
 export type GeometryParserType =
   | 'geojson'
