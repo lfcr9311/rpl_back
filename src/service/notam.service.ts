@@ -6,6 +6,8 @@ import { EnvService } from 'src/config/env.service'
 import {
   AeroviaLinhaModel,
   AeroviasResponseModel,
+  AeroviaUruguayCsvRowModel,
+  AeroviaUruguayModel,
   AiswebItemModel,
   AiswebResponseModel,
   AeroportoModel,
@@ -851,10 +853,6 @@ export class NotamsService {
 
       const textArcCoords = this.parseTextEWithArcs(textE)
 
-      console.log('[NOTAM][ARC DEBUG] number:', item.n ?? item.number)
-      console.log('[NOTAM][ARC DEBUG] qcode:', item.cod)
-      console.log('[NOTAM][ARC DEBUG] textArcCoords length:', textArcCoords.length)
-
       if (textArcCoords.length >= 4) {
         return {
           parser: 'textE-dms',
@@ -952,79 +950,33 @@ export class NotamsService {
     for (const item of items) {
       const numero = String(item.n ?? item.number ?? '').trim().toUpperCase()
       const qcode = this.normalizeQCode(item.cod)
-      const firXml = this.normalizeFir(item.fir)
-      const loc = String(item.loc ?? '').trim().toUpperCase()
       const resolvedFirs = this.resolveItemTargetFirs(item)
       const areaKind = this.inferAreaKindFromQCode(qcode, item.e)
 
-      console.log('[NOTAM] --------------------------------------------------')
-      console.log('[NOTAM] id:', item.id)
-      console.log('[NOTAM] number:', numero)
-      console.log('[NOTAM] qcode:', qcode)
-      console.log('[NOTAM] qcode_subject:', this.getQCodeSubject(qcode))
-      console.log('[NOTAM] area_kind:', areaKind)
-      console.log('[NOTAM] fir_xml:', firXml)
-      console.log('[NOTAM] loc:', loc)
-      console.log('[NOTAM] firs_resolvidas:', resolvedFirs)
-      console.log('[NOTAM] geo:', item.geo ?? '')
-      console.log('[NOTAM] e:', item.e ?? '')
-
-      if (!resolvedFirs.length) {
-        console.log('[NOTAM] descartado: fora das FIRs alvo')
-        continue
-      }
-
-      if (!this.isNotamWithinCurrentWindow(item)) {
-        console.log('[NOTAM] descartado: fora da janela atual B/C ou status != ACTIVE')
-        continue
-      }
-
-      if (this.isIgnoredQCode(qcode)) {
-        console.log('[NOTAM] descartado: qcode ignorado')
-        continue
-      }
-
-      if (!this.isAreaQCode(qcode, item.e)) {
-        console.log('[NOTAM] descartado: qcode/texto nao representa area')
-        continue
-      }
+      if (!resolvedFirs.length) continue
+      if (!this.isNotamWithinCurrentWindow(item)) continue
+      if (this.isIgnoredQCode(qcode)) continue
+      if (!this.isAreaQCode(qcode, item.e)) continue
 
       const geometry = this.extractGeometryFromItem(item)
 
-      console.log('[NOTAM] parser:', geometry.parser)
-      console.log('[NOTAM] coords length:', geometry.coords.length)
-      console.log('[NOTAM] center:', geometry.center)
-      console.log('[NOTAM] radius_m:', geometry.radius_m)
-
-      if (geometry.parser === 'ignored-qcode') {
-        console.log('[NOTAM] descartado: qcode ignorado')
-        continue
-      }
-
-      if (geometry.parser === 'border-closure-unsupported') {
-        console.log('[NOTAM] descartado: area depende de fechamento por fronteira terrestre')
-        continue
-      }
+      if (geometry.parser === 'ignored-qcode') continue
+      if (geometry.parser === 'border-closure-unsupported') continue
 
       if (
         geometry.parser !== 'circle' &&
         this.isPolygonParser(geometry.parser) &&
         geometry.coords.length < 4
       ) {
-        console.log('[NOTAM] descartado: poligono invalido')
         continue
       }
 
-      if (geometry.parser === 'none') {
-        console.log('[NOTAM] descartado: sem geometria valida')
-        continue
-      }
+      if (geometry.parser === 'none') continue
 
       if (
         geometry.parser === 'circle' &&
         (!geometry.center || !geometry.radius_m)
       ) {
-        console.log('[NOTAM] descartado: circulo invalido')
         continue
       }
 
@@ -1049,8 +1001,6 @@ export class NotamsService {
           center: geometry.center,
           radius_m: geometry.radius_m,
         } as AreaNotamApiModel)
-
-        console.log(`[NOTAM] ACEITO NO MAPA EM ${fir}`)
       }
     }
 
@@ -1072,6 +1022,111 @@ export class NotamsService {
     ])
 
     return { alta, baixa }
+  }
+
+  async importAeroviasUruguay(): Promise<AeroviaUruguayModel[]> {
+    const csv = await this.fetchText(this.envService.aeroviasUruguayCsvPath)
+    const lines = csv.split(/\r?\n/).filter((line) => line.trim())
+
+    if (lines.length < 2) {
+      return []
+    }
+
+    const headers = this.splitCsvLine(lines[0]).map((header) => header.trim())
+
+    const idxRoute = headers.indexOf('route')
+    const idxSection = headers.indexOf('section')
+    const idxSeq = headers.indexOf('seq')
+    const idxWaypointName = headers.indexOf('waypoint_name')
+    const idxDetail = headers.indexOf('detail')
+    const idxCoordDms = headers.indexOf('coord_dms')
+    const idxLatitude = headers.indexOf('latitude')
+    const idxLongitude = headers.indexOf('longitude')
+    const idxPage = headers.indexOf('page')
+    const idxEffectiveDate = headers.indexOf('effective_date')
+    const idxSourceFile = headers.indexOf('source_file')
+
+    if (
+      idxRoute < 0 ||
+      idxSection < 0 ||
+      idxSeq < 0 ||
+      idxWaypointName < 0 ||
+      idxLatitude < 0 ||
+      idxLongitude < 0
+    ) {
+      throw new Error('CSV de aerovias do Uruguai inválido')
+    }
+
+    const rows: AeroviaUruguayCsvRowModel[] = []
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = this.splitCsvLine(lines[i])
+
+      const route = String(cols[idxRoute] ?? '').trim().toUpperCase()
+      const section = String(cols[idxSection] ?? '').trim()
+      const seq = Number(cols[idxSeq] ?? '')
+      const waypointName = String(cols[idxWaypointName] ?? '').trim().toUpperCase()
+      const detail = String(cols[idxDetail] ?? '').trim()
+      const coordDms = String(cols[idxCoordDms] ?? '').trim()
+      const latitude = Number(String(cols[idxLatitude] ?? '').replace(',', '.'))
+      const longitude = Number(String(cols[idxLongitude] ?? '').replace(',', '.'))
+      const page = Number(cols[idxPage] ?? '0')
+      const effectiveDate = String(cols[idxEffectiveDate] ?? '').trim()
+      const sourceFile = String(cols[idxSourceFile] ?? '').trim()
+
+      if (!route) continue
+      if (!Number.isFinite(seq)) continue
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
+
+      rows.push({
+        route,
+        section,
+        seq,
+        waypoint_name: waypointName,
+        detail,
+        coord_dms: coordDms,
+        latitude,
+        longitude,
+        page,
+        effective_date: effectiveDate,
+        source_file: sourceFile,
+      })
+    }
+
+    const grouped = new Map<string, AeroviaUruguayCsvRowModel[]>()
+
+    for (const row of rows) {
+      if (!grouped.has(row.route)) {
+        grouped.set(row.route, [])
+      }
+
+      grouped.get(row.route)!.push(row)
+    }
+
+    const result: AeroviaUruguayModel[] = []
+
+    for (const [route, routeRows] of grouped.entries()) {
+      const ordered = [...routeRows].sort((a, b) => a.seq - b.seq)
+
+      result.push({
+        nome: route,
+        section: ordered[0]?.section ?? '',
+        coords_latlon: ordered.map((row) => [row.latitude, row.longitude]),
+        waypoints: ordered.map((row) => ({
+          seq: row.seq,
+          nome: row.waypoint_name,
+          detail: row.detail,
+          coord_dms: row.coord_dms,
+          latitude: row.latitude,
+          longitude: row.longitude,
+          page: row.page,
+          effective_date: row.effective_date,
+          source_file: row.source_file,
+        })),
+      })
+    }
+
+    return result.sort((a, b) => a.nome.localeCompare(b.nome))
   }
 
   async importAeroportos(): Promise<AeroportoModel[]> {

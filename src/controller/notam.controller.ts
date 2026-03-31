@@ -24,8 +24,18 @@ export class NotamsController {
     return { ok: true }
   }
 
-  @Get('areas/firs')
-  findAreasByFirs() {
+  @Post('refresh')
+  refresh() {
+    return this.notamsService.findAreasFromApiByTargetFirs()
+  }
+
+  @Get('notams')
+  findAll() {
+    return this.notamsService.getRemoteNotams()
+  }
+
+  @Get('firs')
+  findNotamsByFirs() {
     return this.notamsService.findAreasFromApiByTargetFirs()
   }
 
@@ -44,13 +54,23 @@ export class NotamsController {
     return this.notamsService.importAeroviasTodas()
   }
 
-  @Get('aeroportos')
-  importAeroportos() {
-    return this.notamsService.importAeroportos()
+  @Get('aerovias/uruguay')
+  importAeroviasUruguay() {
+    return this.notamsService.importAeroviasUruguay()
   }
 
   @Get('rpl')
   importRpl() {
     return this.notamsService.importRpl()
+  }
+
+  @Get('aeroportos')
+  importAeroportos() {
+    return this.notamsService.importAeroportos()
+  }
+
+  @Get('waypoints')
+  importWaypoints() {
+    return this.notamsService.importWaypoints()
   }
 }

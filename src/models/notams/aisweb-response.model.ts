@@ -106,3 +106,36 @@ export interface GeoJsonResponseModel {
   type?: string
   features?: GeoJsonFeatureModel[]
 }
+
+export interface AeroviaUruguayCsvRowModel {
+  route: string
+  section: string
+  seq: number
+  waypoint_name: string
+  detail: string
+  coord_dms: string
+  latitude: number
+  longitude: number
+  page: number
+  effective_date: string
+  source_file: string
+}
+
+export interface AeroviaUruguayWaypointModel {
+  seq: number
+  nome: string
+  detail: string
+  coord_dms: string
+  latitude: number
+  longitude: number
+  page: number
+  effective_date: string
+  source_file: string
+}
+
+export interface AeroviaUruguayModel {
+  nome: string
+  section: string
+  coords_latlon: LatLon[]
+  waypoints: AeroviaUruguayWaypointModel[]
+}
