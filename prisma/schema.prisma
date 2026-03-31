@@ -1,0 +1,36 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Notam {
+  id              String   @id
+  number          String
+  qcode           String?
+  status          String?
+  category        String?
+  dist            String?
+  type            String?
+  issuedAt        DateTime?
+  location        String?
+  fir             String?
+  validFromRaw    String?
+  validToRaw      String?
+  validFrom       DateTime?
+  validTo         DateTime?
+  dailyWindowsRaw String?
+  textE           String?
+  lowerLimit      String?
+  upperLimit      String?
+  geo             String?
+  geoUrl          String?
+  traffic         String?
+  purpose         String?
+  scope           String?
+  rawPayload      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
