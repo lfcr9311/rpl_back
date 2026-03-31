@@ -24,21 +24,6 @@ export class NotamsController {
     return { ok: true }
   }
 
-  @Post('refresh')
-  refresh() {
-    return this.notamsService.refresh()
-  }
-
-  @Get('notams')
-  findAll() {
-    return this.notamsService.findAll()
-  }
-
-  @Get('firs')
-  findNotamsByFirs() {
-    return this.notamsService.findNotamsByFirs()
-  }
-
   @Get('areas/firs')
   findAreasByFirs() {
     return this.notamsService.findAreasFromApiByTargetFirs()

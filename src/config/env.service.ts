@@ -5,10 +5,6 @@ import { ConfigService } from '@nestjs/config'
 export class EnvService {
   constructor(private readonly configService: ConfigService) {}
 
-  get databaseUrl(): string {
-    return this.configService.getOrThrow<string>('DATABASE_URL')
-  }
-
   get aiswebApiUrl(): string {
     return this.configService.getOrThrow<string>('AISWEB_API_URL')
   }

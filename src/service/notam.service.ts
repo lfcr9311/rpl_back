@@ -3,7 +3,6 @@ import { XMLParser } from 'fast-xml-parser'
 import { readFile } from 'node:fs/promises'
 import * as XLSX from 'xlsx'
 import { EnvService } from 'src/config/env.service'
-import { PrismaService } from 'prisma/prisma.service'
 import {
   AeroviaLinhaModel,
   AeroviasResponseModel,
@@ -58,7 +57,6 @@ type ExtractedGeometry =
 @Injectable()
 export class NotamsService {
   constructor(
-    private readonly prisma: PrismaService,
     private readonly envService: EnvService,
   ) {}
 
@@ -445,169 +443,6 @@ export class NotamsService {
     return items
       .filter((item) => this.isNotamWithinCurrentWindow(item))
       .map((item) => this.toModel(item))
-  }
-
-  async refresh(): Promise<{ total: number; totalTargetFirs: number }> {
-    const items = await this.fetchRemoteNotams()
-    const activeItems = items.filter((item) => this.isNotamWithinCurrentWindow(item))
-    const models = activeItems.map((item) => this.toModel(item))
-
-    if (models.length) {
-      await this.prisma.$transaction(
-        models.map((item) =>
-          this.prisma.notam.upsert({
-            where: { id: item.id },
-            create: {
-              id: item.id,
-              number: item.number,
-              qcode: item.qcode,
-              status: item.status,
-              category: item.category,
-              dist: item.dist,
-              type: item.type,
-              issuedAt: item.issuedAt,
-              location: item.location,
-              fir: item.fir,
-              validFromRaw: item.validFromRaw,
-              validToRaw: item.validToRaw,
-              validFrom: item.validFrom,
-              validTo: item.validTo,
-              dailyWindowsRaw: item.dailyWindowsRaw,
-              textE: item.textE,
-              lowerLimit: item.lowerLimit,
-              upperLimit: item.upperLimit,
-              geo: item.geo,
-              geoUrl: item.geoUrl,
-              traffic: item.traffic,
-              purpose: item.purpose,
-              scope: item.scope,
-              rawPayload: item.rawPayload,
-            },
-            update: {
-              number: item.number,
-              qcode: item.qcode,
-              status: item.status,
-              category: item.category,
-              dist: item.dist,
-              type: item.type,
-              issuedAt: item.issuedAt,
-              location: item.location,
-              fir: item.fir,
-              validFromRaw: item.validFromRaw,
-              validToRaw: item.validToRaw,
-              validFrom: item.validFrom,
-              validTo: item.validTo,
-              dailyWindowsRaw: item.dailyWindowsRaw,
-              textE: item.textE,
-              lowerLimit: item.lowerLimit,
-              upperLimit: item.upperLimit,
-              geo: item.geo,
-              geoUrl: item.geoUrl,
-              traffic: item.traffic,
-              purpose: item.purpose,
-              scope: item.scope,
-              rawPayload: item.rawPayload,
-            },
-          }),
-        ),
-      )
-    }
-
-    return {
-      total: models.length,
-      totalTargetFirs: models.filter((item) => this.isTargetFir(item.fir)).length,
-    }
-  }
-
-  async findAll(): Promise<NotamModel[]> {
-    const rows = await this.prisma.notam.findMany({
-      orderBy: [{ validFrom: 'asc' }, { number: 'asc' }],
-    })
-
-    return rows.map(
-      (row) =>
-        new NotamModel({
-          id: row.id,
-          number: row.number,
-          qcode: row.qcode,
-          status: row.status,
-          category: row.category,
-          dist: row.dist,
-          type: row.type,
-          issuedAt: row.issuedAt,
-          location: row.location,
-          fir: row.fir,
-          validFromRaw: row.validFromRaw,
-          validToRaw: row.validToRaw,
-          validFrom: row.validFrom,
-          validTo: row.validTo,
-          dailyWindowsRaw: row.dailyWindowsRaw,
-          textE: row.textE,
-          lowerLimit: row.lowerLimit,
-          upperLimit: row.upperLimit,
-          geo: row.geo,
-          geoUrl: row.geoUrl,
-          traffic: row.traffic,
-          purpose: row.purpose,
-          scope: row.scope,
-          rawPayload: row.rawPayload,
-        }),
-    )
-  }
-
-  async findNotamsByFirs(): Promise<Record<string, NotamModel[]>> {
-    const rows = await this.prisma.notam.findMany({
-      where: {
-        fir: {
-          in: this.targetFirs,
-        },
-      },
-      orderBy: [{ fir: 'asc' }, { validFrom: 'asc' }, { number: 'asc' }],
-    })
-
-    const grouped: Record<string, NotamModel[]> = {
-      SBCW: [],
-      SBBS: [],
-      SBRE: [],
-      SBAZ: [],
-      SBAO: [],
-    }
-
-    for (const row of rows) {
-      const fir = this.normalizeFir(row.fir)
-      if (!grouped[fir]) continue
-
-      grouped[fir].push(
-        new NotamModel({
-          id: row.id,
-          number: row.number,
-          qcode: row.qcode,
-          status: row.status,
-          category: row.category,
-          dist: row.dist,
-          type: row.type,
-          issuedAt: row.issuedAt,
-          location: row.location,
-          fir: row.fir,
-          validFromRaw: row.validFromRaw,
-          validToRaw: row.validToRaw,
-          validFrom: row.validFrom,
-          validTo: row.validTo,
-          dailyWindowsRaw: row.dailyWindowsRaw,
-          textE: row.textE,
-          lowerLimit: row.lowerLimit,
-          upperLimit: row.upperLimit,
-          geo: row.geo,
-          geoUrl: row.geoUrl,
-          traffic: row.traffic,
-          purpose: row.purpose,
-          scope: row.scope,
-          rawPayload: row.rawPayload,
-        }),
-      )
-    }
-
-    return grouped
   }
 
   private isFiniteCoord(coord: LatLon): boolean {
