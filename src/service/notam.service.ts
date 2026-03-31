@@ -18,8 +18,8 @@ import {
   LatLon,
   RotaRplModel,
   WaypointModel,
-} from 'src/models/notams/aisweb-response.model'
-import { NotamModel } from 'src/models/notams/notam'
+} from '../models/notams/aisweb-response.model'
+import { NotamModel } from '../models/notams/notam'
 
 type GeometryParserType =
   | 'geojson'
