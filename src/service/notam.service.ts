@@ -20,7 +20,7 @@ import {
   WaypointModel,
 } from '../models/notams/aisweb-response.model'
 import { NotamModel } from '../models/notams/notam'
-import { isAbsolute, join } from 'path'
+import uruguayAerovias from '../data/uruguay-aerovias.json'
 
 type GeometryParserType =
   | 'geojson'
@@ -1026,9 +1026,11 @@ export class NotamsService {
   }
 
 async importAeroviasUruguay(): Promise<AeroviaUruguayModel[]> {
-  const grouped = new Map<string, typeof data>()
+  const rows = uruguayAerovias as AeroviaUruguayCsvRowModel[]
 
-  for (const row of data) {
+  const grouped = new Map<string, AeroviaUruguayCsvRowModel[]>()
+
+  for (const row of rows) {
     if (!grouped.has(row.route)) {
       grouped.set(row.route, [])
     }
@@ -1044,18 +1046,18 @@ async importAeroviasUruguay(): Promise<AeroviaUruguayModel[]> {
     result.push({
       nome: route,
       section: ordered[0]?.section ?? '',
-      coords_latlon: ordered.map((r) => [r.latitude, r.longitude]),
-      waypoints: ordered.map((r) => ({
-        seq: r.seq,
-        nome: r.waypoint_name,
-        detail: r.detail,
-        coord_dms: r.coord_dms,
-        latitude: r.latitude,
-        longitude: r.longitude,
-        page: r.page,
-        effective_date: r.effective_date,
-        source_file: r.source_file
-      }))
+      coords_latlon: ordered.map((row) => [row.latitude, row.longitude]),
+      waypoints: ordered.map((row) => ({
+        seq: row.seq,
+        nome: row.waypoint_name,
+        detail: row.detail,
+        coord_dms: row.coord_dms,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        page: row.page,
+        effective_date: row.effective_date,
+        source_file: row.source_file,
+      })),
     })
   }
 
