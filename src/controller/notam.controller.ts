@@ -21,6 +21,7 @@ export class NotamsController {
 
   @Get('health')
   health() {
+    console.log('Health check')
     return { ok: true }
   }
 
