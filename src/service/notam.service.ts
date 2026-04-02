@@ -1025,125 +1025,42 @@ export class NotamsService {
     return { alta, baixa }
   }
 
-  async importAeroviasUruguay(): Promise<AeroviaUruguayModel[]> {
-    const configuredPath = this.envService.aeroviasUruguayCsvPath?.trim()
+async importAeroviasUruguay(): Promise<AeroviaUruguayModel[]> {
+  const grouped = new Map<string, typeof data>()
 
-    if (!configuredPath) {
-      return []
+  for (const row of data) {
+    if (!grouped.has(row.route)) {
+      grouped.set(row.route, [])
     }
 
-    const filePath = /^https?:\/\//i.test(configuredPath)
-      ? configuredPath
-      : isAbsolute(configuredPath)
-        ? configuredPath
-        : join(process.cwd(), configuredPath)
-
-    const csv = /^https?:\/\//i.test(filePath)
-      ? await this.fetchText(filePath)
-      : await readFile(filePath, 'utf-8')
-
-    const lines = csv.split(/\r?\n/).filter((line) => line.trim())
-
-    if (lines.length < 2) {
-      return []
-    }
-
-    const headers = this.splitCsvLine(lines[0]).map((header) => header.trim())
-
-    const idxRoute = headers.indexOf('route')
-    const idxSection = headers.indexOf('section')
-    const idxSeq = headers.indexOf('seq')
-    const idxWaypointName = headers.indexOf('waypoint_name')
-    const idxDetail = headers.indexOf('detail')
-    const idxCoordDms = headers.indexOf('coord_dms')
-    const idxLatitude = headers.indexOf('latitude')
-    const idxLongitude = headers.indexOf('longitude')
-    const idxPage = headers.indexOf('page')
-    const idxEffectiveDate = headers.indexOf('effective_date')
-    const idxSourceFile = headers.indexOf('source_file')
-
-    if (
-      idxRoute < 0 ||
-      idxSection < 0 ||
-      idxSeq < 0 ||
-      idxWaypointName < 0 ||
-      idxLatitude < 0 ||
-      idxLongitude < 0
-    ) {
-      throw new Error('CSV de aerovias do Uruguai inválido')
-    }
-
-    const rows: AeroviaUruguayCsvRowModel[] = []
-
-    for (let i = 1; i < lines.length; i++) {
-      const cols = this.splitCsvLine(lines[i])
-
-      const route = String(cols[idxRoute] ?? '').trim().toUpperCase()
-      const section = String(cols[idxSection] ?? '').trim()
-      const seq = Number(String(cols[idxSeq] ?? '').trim())
-      const waypointName = String(cols[idxWaypointName] ?? '').trim().toUpperCase()
-      const detail = String(cols[idxDetail] ?? '').trim()
-      const coordDms = String(cols[idxCoordDms] ?? '').trim()
-      const latitude = Number(String(cols[idxLatitude] ?? '').trim().replace(',', '.'))
-      const longitude = Number(String(cols[idxLongitude] ?? '').trim().replace(',', '.'))
-      const page = Number(String(cols[idxPage] ?? '0').trim())
-      const effectiveDate = String(cols[idxEffectiveDate] ?? '').trim()
-      const sourceFile = String(cols[idxSourceFile] ?? '').trim()
-
-      if (!route) continue
-      if (!Number.isFinite(seq)) continue
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
-
-      rows.push({
-        route,
-        section,
-        seq,
-        waypoint_name: waypointName,
-        detail,
-        coord_dms: coordDms,
-        latitude,
-        longitude,
-        page,
-        effective_date: effectiveDate,
-        source_file: sourceFile,
-      })
-    }
-
-    const grouped = new Map<string, AeroviaUruguayCsvRowModel[]>()
-
-    for (const row of rows) {
-      if (!grouped.has(row.route)) {
-        grouped.set(row.route, [])
-      }
-
-      grouped.get(row.route)!.push(row)
-    }
-
-    const result: AeroviaUruguayModel[] = []
-
-    for (const [route, routeRows] of grouped.entries()) {
-      const ordered = [...routeRows].sort((a, b) => a.seq - b.seq)
-
-      result.push({
-        nome: route,
-        section: ordered[0]?.section ?? '',
-        coords_latlon: ordered.map((row) => [row.latitude, row.longitude]),
-        waypoints: ordered.map((row) => ({
-          seq: row.seq,
-          nome: row.waypoint_name,
-          detail: row.detail,
-          coord_dms: row.coord_dms,
-          latitude: row.latitude,
-          longitude: row.longitude,
-          page: row.page,
-          effective_date: row.effective_date,
-          source_file: row.source_file,
-        })),
-      })
-    }
-
-    return result.sort((a, b) => a.nome.localeCompare(b.nome))
+    grouped.get(row.route)!.push(row)
   }
+
+  const result: AeroviaUruguayModel[] = []
+
+  for (const [route, routeRows] of grouped.entries()) {
+    const ordered = [...routeRows].sort((a, b) => a.seq - b.seq)
+
+    result.push({
+      nome: route,
+      section: ordered[0]?.section ?? '',
+      coords_latlon: ordered.map((r) => [r.latitude, r.longitude]),
+      waypoints: ordered.map((r) => ({
+        seq: r.seq,
+        nome: r.waypoint_name,
+        detail: r.detail,
+        coord_dms: r.coord_dms,
+        latitude: r.latitude,
+        longitude: r.longitude,
+        page: r.page,
+        effective_date: r.effective_date,
+        source_file: r.source_file
+      }))
+    })
+  }
+
+  return result.sort((a, b) => a.nome.localeCompare(b.nome))
+}
 
   async importAeroportos(): Promise<AeroportoModel[]> {
     const csv = await this.fetchText(this.envService.airportsUrl)
