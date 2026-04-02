@@ -20,6 +20,7 @@ import {
   WaypointModel,
 } from '../models/notams/aisweb-response.model'
 import { NotamModel } from '../models/notams/notam'
+import { isAbsolute, join } from 'path'
 
 type GeometryParserType =
   | 'geojson'
@@ -44,23 +45,23 @@ type AreaKind =
 
 type ExtractedGeometry =
   | {
-      parser: 'circle'
-      coords: []
-      center: LatLon
-      radius_m: number
-    }
+    parser: 'circle'
+    coords: []
+    center: LatLon
+    radius_m: number
+  }
   | {
-      parser: Exclude<GeometryParserType, 'circle'>
-      coords: LatLon[]
-      center: null
-      radius_m: null
-    }
+    parser: Exclude<GeometryParserType, 'circle'>
+    coords: LatLon[]
+    center: null
+    radius_m: null
+  }
 
 @Injectable()
 export class NotamsService {
   constructor(
     private readonly envService: EnvService,
-  ) {}
+  ) { }
 
   private readonly parser = new XMLParser({
     ignoreAttributes: false,
@@ -1025,7 +1026,22 @@ export class NotamsService {
   }
 
   async importAeroviasUruguay(): Promise<AeroviaUruguayModel[]> {
-    const csv = await this.fetchText(this.envService.aeroviasUruguayCsvPath)
+    const configuredPath = this.envService.aeroviasUruguayCsvPath?.trim()
+
+    if (!configuredPath) {
+      return []
+    }
+
+    const filePath = /^https?:\/\//i.test(configuredPath)
+      ? configuredPath
+      : isAbsolute(configuredPath)
+        ? configuredPath
+        : join(process.cwd(), configuredPath)
+
+    const csv = /^https?:\/\//i.test(filePath)
+      ? await this.fetchText(filePath)
+      : await readFile(filePath, 'utf-8')
+
     const lines = csv.split(/\r?\n/).filter((line) => line.trim())
 
     if (lines.length < 2) {
@@ -1064,13 +1080,13 @@ export class NotamsService {
 
       const route = String(cols[idxRoute] ?? '').trim().toUpperCase()
       const section = String(cols[idxSection] ?? '').trim()
-      const seq = Number(cols[idxSeq] ?? '')
+      const seq = Number(String(cols[idxSeq] ?? '').trim())
       const waypointName = String(cols[idxWaypointName] ?? '').trim().toUpperCase()
       const detail = String(cols[idxDetail] ?? '').trim()
       const coordDms = String(cols[idxCoordDms] ?? '').trim()
-      const latitude = Number(String(cols[idxLatitude] ?? '').replace(',', '.'))
-      const longitude = Number(String(cols[idxLongitude] ?? '').replace(',', '.'))
-      const page = Number(cols[idxPage] ?? '0')
+      const latitude = Number(String(cols[idxLatitude] ?? '').trim().replace(',', '.'))
+      const longitude = Number(String(cols[idxLongitude] ?? '').trim().replace(',', '.'))
+      const page = Number(String(cols[idxPage] ?? '0').trim())
       const effectiveDate = String(cols[idxEffectiveDate] ?? '').trim()
       const sourceFile = String(cols[idxSourceFile] ?? '').trim()
 
