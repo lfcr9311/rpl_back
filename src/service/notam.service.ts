@@ -1253,11 +1253,10 @@ export class NotamsService {
       return response.text()
     }
 
-    const { join } = await import('path')
+    const path = await import('node:path')
+    const filePath = path.join(process.cwd(), source)
 
-    const filePath = join(process.cwd(), source)
-
-    console.log('LENDO CSV EM:', filePath)
+    console.log('LENDO ARQUIVO:', filePath)
 
     return readFile(filePath, 'utf-8')
   }
