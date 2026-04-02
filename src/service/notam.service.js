@@ -1,43 +1,10 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
 var __decorate = (this && this.__decorate) || function (decorators, target, key, desc) {
     var c = arguments.length, r = c < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d;
     if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r = Reflect.decorate(decorators, target, key, desc);
     else for (var i = decorators.length - 1; i >= 0; i--) if (d = decorators[i]) r = (c < 3 ? d(r) : c > 3 ? d(target, key, r) : d(target, key)) || r;
     return c > 3 && r && Object.defineProperty(target, key, r), r;
 };
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 var __metadata = (this && this.__metadata) || function (k, v) {
     if (typeof Reflect === "object" && typeof Reflect.metadata === "function") return Reflect.metadata(k, v);
 };
@@ -46,7 +13,6 @@ exports.NotamsService = void 0;
 const common_1 = require("@nestjs/common");
 const fast_xml_parser_1 = require("fast-xml-parser");
 const promises_1 = require("node:fs/promises");
-const XLSX = __importStar(require("xlsx"));
 const env_service_1 = require("../config/env.service");
 const notam_1 = require("../models/notams/notam");
 let NotamsService = class NotamsService {
@@ -796,95 +762,6 @@ let NotamsService = class NotamsService {
         ]);
         return { alta, baixa };
     }
-    async importAeroviasUruguay() {
-        const csv = await this.fetchText(this.envService.aeroviasUruguayCsvPath);
-        const lines = csv.split(/\r?\n/).filter((line) => line.trim());
-        if (lines.length < 2) {
-            return [];
-        }
-        const headers = this.splitCsvLine(lines[0]).map((header) => header.trim());
-        const idxRoute = headers.indexOf('route');
-        const idxSection = headers.indexOf('section');
-        const idxSeq = headers.indexOf('seq');
-        const idxWaypointName = headers.indexOf('waypoint_name');
-        const idxDetail = headers.indexOf('detail');
-        const idxCoordDms = headers.indexOf('coord_dms');
-        const idxLatitude = headers.indexOf('latitude');
-        const idxLongitude = headers.indexOf('longitude');
-        const idxPage = headers.indexOf('page');
-        const idxEffectiveDate = headers.indexOf('effective_date');
-        const idxSourceFile = headers.indexOf('source_file');
-        if (idxRoute < 0 ||
-            idxSection < 0 ||
-            idxSeq < 0 ||
-            idxWaypointName < 0 ||
-            idxLatitude < 0 ||
-            idxLongitude < 0) {
-            throw new Error('CSV de aerovias do Uruguai inválido');
-        }
-        const rows = [];
-        for (let i = 1; i < lines.length; i++) {
-            const cols = this.splitCsvLine(lines[i]);
-            const route = String(cols[idxRoute] ?? '').trim().toUpperCase();
-            const section = String(cols[idxSection] ?? '').trim();
-            const seq = Number(cols[idxSeq] ?? '');
-            const waypointName = String(cols[idxWaypointName] ?? '').trim().toUpperCase();
-            const detail = String(cols[idxDetail] ?? '').trim();
-            const coordDms = String(cols[idxCoordDms] ?? '').trim();
-            const latitude = Number(String(cols[idxLatitude] ?? '').replace(',', '.'));
-            const longitude = Number(String(cols[idxLongitude] ?? '').replace(',', '.'));
-            const page = Number(cols[idxPage] ?? '0');
-            const effectiveDate = String(cols[idxEffectiveDate] ?? '').trim();
-            const sourceFile = String(cols[idxSourceFile] ?? '').trim();
-            if (!route)
-                continue;
-            if (!Number.isFinite(seq))
-                continue;
-            if (!Number.isFinite(latitude) || !Number.isFinite(longitude))
-                continue;
-            rows.push({
-                route,
-                section,
-                seq,
-                waypoint_name: waypointName,
-                detail,
-                coord_dms: coordDms,
-                latitude,
-                longitude,
-                page,
-                effective_date: effectiveDate,
-                source_file: sourceFile,
-            });
-        }
-        const grouped = new Map();
-        for (const row of rows) {
-            if (!grouped.has(row.route)) {
-                grouped.set(row.route, []);
-            }
-            grouped.get(row.route).push(row);
-        }
-        const result = [];
-        for (const [route, routeRows] of grouped.entries()) {
-            const ordered = [...routeRows].sort((a, b) => a.seq - b.seq);
-            result.push({
-                nome: route,
-                section: ordered[0]?.section ?? '',
-                coords_latlon: ordered.map((row) => [row.latitude, row.longitude]),
-                waypoints: ordered.map((row) => ({
-                    seq: row.seq,
-                    nome: row.waypoint_name,
-                    detail: row.detail,
-                    coord_dms: row.coord_dms,
-                    latitude: row.latitude,
-                    longitude: row.longitude,
-                    page: row.page,
-                    effective_date: row.effective_date,
-                    source_file: row.source_file,
-                })),
-            });
-        }
-        return result.sort((a, b) => a.nome.localeCompare(b.nome));
-    }
     async importAeroportos() {
         const csv = await this.fetchText(this.envService.airportsUrl);
         const lines = csv.split(/\r?\n/).filter((line) => line.trim());
@@ -928,42 +805,15 @@ let NotamsService = class NotamsService {
         return Array.from(byIcao.values()).sort((a, b) => a.icao.localeCompare(b.icao));
     }
     async importWaypoints() {
-        const workbook = XLSX.readFile(this.envService.waypointsUrl);
-        const firstSheet = workbook.SheetNames[0];
-        if (!firstSheet)
-            return [];
-        const sheet = workbook.Sheets[firstSheet];
-        const rows = XLSX.utils.sheet_to_json(sheet, {
-            defval: '',
-            raw: false,
-        });
-        const byIdent = new Map();
-        for (const row of rows) {
-            const ident = String(row.ident ?? '').trim().toUpperCase();
-            const latitude = Number(String(row.latitude ?? '').replace(',', '.'));
-            const longitude = Number(String(row.longitude ?? '').replace(',', '.'));
-            if (!ident)
-                continue;
-            if (!Number.isFinite(latitude) || !Number.isFinite(longitude))
-                continue;
-            if (!byIdent.has(ident)) {
-                byIdent.set(ident, {
-                    ident,
-                    latitude,
-                    longitude,
-                });
-            }
-        }
-        return Array.from(byIdent.values()).sort((a, b) => a.ident.localeCompare(b.ident));
+        return [];
     }
     async importRpl() {
-        const [text, aeroportos, waypoints] = await Promise.all([
+        const [text, aeroportos] = await Promise.all([
             this.fetchText(this.envService.rplUrl),
             this.importAeroportos(),
-            this.importWaypoints(),
         ]);
         const airportMap = new Map(aeroportos.map((a) => [a.icao, a]));
-        const waypointMap = new Map(waypoints.map((w) => [w.ident, w]));
+        const waypointMap = new Map();
         const registros = this.parseRplRecords(text);
         const result = [];
         for (const registro of registros) {
@@ -980,6 +830,20 @@ let NotamsService = class NotamsService {
             throw new Error(`Erro HTTP ${response.status} em ${url}`);
         }
         return response.json();
+    }
+    async fetchBuffer(source) {
+        if (/^https?:\/\//i.test(source)) {
+            const response = await this.fetchWithTimeout(source, 20000);
+            if (!response.ok) {
+                throw new Error(`Erro HTTP ${response.status} em ${source}`);
+            }
+            const arrayBuffer = await response.arrayBuffer();
+            return Buffer.from(arrayBuffer);
+        }
+        const path = await import('node:path');
+        const filePath = path.join(process.cwd(), source);
+        console.log('LENDO ARQUIVO BINARIO:', filePath);
+        return (0, promises_1.readFile)(filePath);
     }
     async fetchText(source) {
         if (/^https?:\/\//i.test(source)) {
@@ -1111,8 +975,6 @@ let NotamsService = class NotamsService {
         if (upper.startsWith('CIA:'))
             return true;
         if (upper.includes('INÍCIO DE VALIDADE'))
-            return true;
-        if (upper.includes('INÃ'))
             return true;
         if (upper.includes('PAG.:'))
             return true;

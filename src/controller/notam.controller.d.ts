@@ -12,7 +12,6 @@ export declare class NotamsController {
     importAeroviasAlta(): Promise<import("../models/notams/aisweb-response.model").AeroviaLinhaModel[]>;
     importAeroviasBaixa(): Promise<import("../models/notams/aisweb-response.model").AeroviaLinhaModel[]>;
     importAeroviasTodas(): Promise<import("../models/notams/aisweb-response.model").AeroviasResponseModel>;
-    importAeroviasUruguay(): Promise<import("../models/notams/aisweb-response.model").AeroviaUruguayModel[]>;
     importRpl(): Promise<import("../models/notams/aisweb-response.model").RotaRplModel[]>;
     importAeroportos(): Promise<import("../models/notams/aisweb-response.model").AeroportoModel[]>;
     importWaypoints(): Promise<import("../models/notams/aisweb-response.model").WaypointModel[]>;

@@ -1,5 +1,5 @@
 import { EnvService } from '../config/env.service';
-import { AeroviaLinhaModel, AeroviasResponseModel, AeroviaUruguayModel, AiswebItemModel, AeroportoModel, AreaNotamApiModel, RotaRplModel, WaypointModel } from '../models/notams/aisweb-response.model';
+import { AeroviaLinhaModel, AeroviasResponseModel, AiswebItemModel, AeroportoModel, AreaNotamApiModel, RotaRplModel, WaypointModel } from '../models/notams/aisweb-response.model';
 import { NotamModel } from '../models/notams/notam';
 export declare class NotamsService {
     private readonly envService;
@@ -63,11 +63,11 @@ export declare class NotamsService {
     importAeroviasAlta(): Promise<AeroviaLinhaModel[]>;
     importAeroviasBaixa(): Promise<AeroviaLinhaModel[]>;
     importAeroviasTodas(): Promise<AeroviasResponseModel>;
-    importAeroviasUruguay(): Promise<AeroviaUruguayModel[]>;
     importAeroportos(): Promise<AeroportoModel[]>;
     importWaypoints(): Promise<WaypointModel[]>;
     importRpl(): Promise<RotaRplModel[]>;
     private fetchJson;
+    private fetchBuffer;
     private fetchText;
     private toLatLonPair;
     private extractAeroviaName;

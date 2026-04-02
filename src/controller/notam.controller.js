@@ -28,6 +28,7 @@ let NotamsController = class NotamsController {
         });
     }
     health() {
+        console.log('Health check');
         return { ok: true };
     }
     refresh() {
@@ -47,9 +48,6 @@ let NotamsController = class NotamsController {
     }
     importAeroviasTodas() {
         return this.notamsService.importAeroviasTodas();
-    }
-    importAeroviasUruguay() {
-        return this.notamsService.importAeroviasUruguay();
     }
     importRpl() {
         return this.notamsService.importRpl();
@@ -112,12 +110,6 @@ __decorate([
     __metadata("design:paramtypes", []),
     __metadata("design:returntype", void 0)
 ], NotamsController.prototype, "importAeroviasTodas", null);
-__decorate([
-    (0, common_1.Get)('aerovias/uruguay'),
-    __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
-    __metadata("design:returntype", void 0)
-], NotamsController.prototype, "importAeroviasUruguay", null);
 __decorate([
     (0, common_1.Get)('rpl'),
     __metadata("design:type", Function),
