@@ -20,8 +20,6 @@ import {
   WaypointModel,
 } from '../models/notams/aisweb-response.model'
 import { NotamModel } from '../models/notams/notam'
-import uruguayAerovias from '../data/uruguay-aerovias.json'
-
 type GeometryParserType =
   | 'geojson'
   | 'wkt'
@@ -1024,45 +1022,6 @@ export class NotamsService {
 
     return { alta, baixa }
   }
-
-async importAeroviasUruguay(): Promise<AeroviaUruguayModel[]> {
-  const rows = uruguayAerovias as AeroviaUruguayCsvRowModel[]
-
-  const grouped = new Map<string, AeroviaUruguayCsvRowModel[]>()
-
-  for (const row of rows) {
-    if (!grouped.has(row.route)) {
-      grouped.set(row.route, [])
-    }
-
-    grouped.get(row.route)!.push(row)
-  }
-
-  const result: AeroviaUruguayModel[] = []
-
-  for (const [route, routeRows] of grouped.entries()) {
-    const ordered = [...routeRows].sort((a, b) => a.seq - b.seq)
-
-    result.push({
-      nome: route,
-      section: ordered[0]?.section ?? '',
-      coords_latlon: ordered.map((row) => [row.latitude, row.longitude]),
-      waypoints: ordered.map((row) => ({
-        seq: row.seq,
-        nome: row.waypoint_name,
-        detail: row.detail,
-        coord_dms: row.coord_dms,
-        latitude: row.latitude,
-        longitude: row.longitude,
-        page: row.page,
-        effective_date: row.effective_date,
-        source_file: row.source_file,
-      })),
-    })
-  }
-
-  return result.sort((a, b) => a.nome.localeCompare(b.nome))
-}
 
   async importAeroportos(): Promise<AeroportoModel[]> {
     const csv = await this.fetchText(this.envService.airportsUrl)
