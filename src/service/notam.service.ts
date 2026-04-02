@@ -1250,7 +1250,9 @@ export class NotamsService {
         throw new Error(`Erro HTTP ${response.status} em ${source}`)
       }
 
-      return response.text()
+      const buffer = await response.arrayBuffer()
+
+      return Buffer.from(buffer).toString('latin1')
     }
 
     const path = await import('node:path')
