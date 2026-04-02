@@ -7,28 +7,15 @@ import { AppModule } from './app.module'
 async function bootstrap() {
   const app = await NestFactory.create(AppModule)
 
-  const allowedOrigins = [
-    'http://localhost:5173',
-    'http://127.0.0.1:5173',
-    'https://rpl-back.vercel.app',
-    process.env.FRONTEND_ORIGIN,
-  ].filter((origin): origin is string => Boolean(origin))
-
   app.enableCors({
-    origin: (origin, callback) => {
-      if (!origin) {
-        return callback(null, true)
-      }
-
-      if (allowedOrigins.includes(origin)) {
-        return callback(null, true)
-      }
-
-      return callback(new Error(`Origin ${origin} not allowed by CORS`), false)
-    },
-    credentials: true,
+    origin: [
+      'http://localhost:5173',
+      'http://127.0.0.1:5173',
+      'https://rpl-back.vercel.app',
+    ],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: false,
   })
 
   app.setGlobalPrefix('api')
