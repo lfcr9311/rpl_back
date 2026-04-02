@@ -44,23 +44,23 @@ type AreaKind =
 
 type ExtractedGeometry =
   | {
-    parser: 'circle'
-    coords: []
-    center: LatLon
-    radius_m: number
-  }
+      parser: 'circle'
+      coords: []
+      center: LatLon
+      radius_m: number
+    }
   | {
-    parser: Exclude<GeometryParserType, 'circle'>
-    coords: LatLon[]
-    center: null
-    radius_m: null
-  }
+      parser: Exclude<GeometryParserType, 'circle'>
+      coords: LatLon[]
+      center: null
+      radius_m: null
+    }
 
 @Injectable()
 export class NotamsService {
   constructor(
     private readonly envService: EnvService,
-  ) { }
+  ) {}
 
   private readonly parser = new XMLParser({
     ignoreAttributes: false,
@@ -1177,7 +1177,9 @@ export class NotamsService {
   }
 
   async importWaypoints(): Promise<WaypointModel[]> {
-    const workbook = XLSX.readFile(this.envService.waypointsUrl)
+    const source = this.envService.waypointsUrl
+    const buffer = await this.fetchBuffer(source)
+    const workbook = XLSX.read(buffer, { type: 'buffer' })
     const firstSheet = workbook.SheetNames[0]
 
     if (!firstSheet) return []
@@ -1191,9 +1193,13 @@ export class NotamsService {
     const byIdent = new Map<string, WaypointModel>()
 
     for (const row of rows) {
-      const ident = String(row.ident ?? '').trim().toUpperCase()
-      const latitude = Number(String(row.latitude ?? '').replace(',', '.'))
-      const longitude = Number(String(row.longitude ?? '').replace(',', '.'))
+      const ident = String(row.ident ?? row.Ident ?? row.IDENT ?? '').trim().toUpperCase()
+      const latitude = Number(
+        String(row.latitude ?? row.Latitude ?? row.LATITUDE ?? '').replace(',', '.'),
+      )
+      const longitude = Number(
+        String(row.longitude ?? row.Longitude ?? row.LONGITUDE ?? '').replace(',', '.'),
+      )
 
       if (!ident) continue
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
@@ -1242,6 +1248,26 @@ export class NotamsService {
     return response.json() as Promise<T>
   }
 
+  private async fetchBuffer(source: string): Promise<Buffer> {
+    if (/^https?:\/\//i.test(source)) {
+      const response = await this.fetchWithTimeout(source, 20000)
+
+      if (!response.ok) {
+        throw new Error(`Erro HTTP ${response.status} em ${source}`)
+      }
+
+      const arrayBuffer = await response.arrayBuffer()
+      return Buffer.from(arrayBuffer)
+    }
+
+    const path = await import('node:path')
+    const filePath = path.join(process.cwd(), source)
+
+    console.log('LENDO ARQUIVO BINARIO:', filePath)
+
+    return readFile(filePath)
+  }
+
   private async fetchText(source: string): Promise<string> {
     if (/^https?:\/\//i.test(source)) {
       const response = await this.fetchWithTimeout(source, 20000)
@@ -1251,7 +1277,6 @@ export class NotamsService {
       }
 
       const buffer = await response.arrayBuffer()
-
       return Buffer.from(buffer).toString('latin1')
     }
 
@@ -1402,7 +1427,6 @@ export class NotamsService {
     if (upper.includes('CLASSIFICA')) return true
     if (upper.startsWith('CIA:')) return true
     if (upper.includes('INÍCIO DE VALIDADE')) return true
-    if (upper.includes('INÃ')) return true
     if (upper.includes('PAG.:')) return true
     if (upper.includes('VALIDO VALIDO DIAS OP')) return true
     if (upper.includes('DEST') && upper.includes('OBSERVACOES')) return true

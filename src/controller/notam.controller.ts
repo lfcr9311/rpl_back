@@ -54,10 +54,10 @@ export class NotamsController {
     return this.notamsService.importAeroviasTodas()
   }
 
-  // @Get('aerovias/uruguay')
-  // importAeroviasUruguay() {
-  //   return this.notamsService.importAeroviasUruguay()
-  // }
+  @Get('aerovias/uruguay')
+  importAeroviasUruguay() {
+    return this.notamsService.importAeroviasUruguay()
+  }
 
   @Get('rpl')
   importRpl() {
