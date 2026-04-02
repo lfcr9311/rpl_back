@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common'
 import { XMLParser } from 'fast-xml-parser'
 import { readFile } from 'node:fs/promises'
-import * as XLSX from 'xlsx'
 import { EnvService } from '../config/env.service'
 import {
   AeroviaLinhaModel,
@@ -20,6 +19,7 @@ import {
   WaypointModel,
 } from '../models/notams/aisweb-response.model'
 import { NotamModel } from '../models/notams/notam'
+
 type GeometryParserType =
   | 'geojson'
   | 'wkt'
@@ -43,23 +43,21 @@ type AreaKind =
 
 type ExtractedGeometry =
   | {
-    parser: 'circle'
-    coords: []
-    center: LatLon
-    radius_m: number
-  }
+      parser: 'circle'
+      coords: []
+      center: LatLon
+      radius_m: number
+    }
   | {
-    parser: Exclude<GeometryParserType, 'circle'>
-    coords: LatLon[]
-    center: null
-    radius_m: null
-  }
+      parser: Exclude<GeometryParserType, 'circle'>
+      coords: LatLon[]
+      center: null
+      radius_m: null
+    }
 
 @Injectable()
 export class NotamsService {
-  constructor(
-    private readonly envService: EnvService,
-  ) { }
+  constructor(private readonly envService: EnvService) {}
 
   private readonly parser = new XMLParser({
     ignoreAttributes: false,
@@ -1071,54 +1069,17 @@ export class NotamsService {
   }
 
   async importWaypoints(): Promise<WaypointModel[]> {
-    const source = this.envService.waypointsUrl
-    const buffer = await this.fetchBuffer(source)
-    const workbook = XLSX.read(buffer, { type: 'buffer' })
-    const firstSheet = workbook.SheetNames[0]
-
-    if (!firstSheet) return []
-
-    const sheet = workbook.Sheets[firstSheet]
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-      defval: '',
-      raw: false,
-    })
-
-    const byIdent = new Map<string, WaypointModel>()
-
-    for (const row of rows) {
-      const ident = String(row.ident ?? row.Ident ?? row.IDENT ?? '').trim().toUpperCase()
-      const latitude = Number(
-        String(row.latitude ?? row.Latitude ?? row.LATITUDE ?? '').replace(',', '.'),
-      )
-      const longitude = Number(
-        String(row.longitude ?? row.Longitude ?? row.LONGITUDE ?? '').replace(',', '.'),
-      )
-
-      if (!ident) continue
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
-
-      if (!byIdent.has(ident)) {
-        byIdent.set(ident, {
-          ident,
-          latitude,
-          longitude,
-        })
-      }
-    }
-
-    return Array.from(byIdent.values()).sort((a, b) => a.ident.localeCompare(b.ident))
+    return []
   }
 
   async importRpl(): Promise<RotaRplModel[]> {
-    const [text, aeroportos, waypoints] = await Promise.all([
+    const [text, aeroportos] = await Promise.all([
       this.fetchText(this.envService.rplUrl),
       this.importAeroportos(),
-      this.importWaypoints(),
     ])
 
     const airportMap = new Map(aeroportos.map((a) => [a.icao, a]))
-    const waypointMap = new Map(waypoints.map((w) => [w.ident, w]))
+    const waypointMap = new Map<string, WaypointModel>()
     const registros = this.parseRplRecords(text)
     const result: RotaRplModel[] = []
 
