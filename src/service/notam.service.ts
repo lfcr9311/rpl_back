@@ -44,23 +44,23 @@ type AreaKind =
 
 type ExtractedGeometry =
   | {
-      parser: 'circle'
-      coords: []
-      center: LatLon
-      radius_m: number
-    }
+    parser: 'circle'
+    coords: []
+    center: LatLon
+    radius_m: number
+  }
   | {
-      parser: Exclude<GeometryParserType, 'circle'>
-      coords: LatLon[]
-      center: null
-      radius_m: null
-    }
+    parser: Exclude<GeometryParserType, 'circle'>
+    coords: LatLon[]
+    center: null
+    radius_m: null
+  }
 
 @Injectable()
 export class NotamsService {
   constructor(
     private readonly envService: EnvService,
-  ) {}
+  ) { }
 
   private readonly parser = new XMLParser({
     ignoreAttributes: false,
@@ -1253,7 +1253,13 @@ export class NotamsService {
       return response.text()
     }
 
-    return readFile(source, 'utf-8')
+    const { join } = await import('path')
+
+    const filePath = join(process.cwd(), source)
+
+    console.log('LENDO CSV EM:', filePath)
+
+    return readFile(filePath, 'utf-8')
   }
 
   private toLatLonPair(coordinate: number[]): LatLon {
