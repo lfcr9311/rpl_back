@@ -57,6 +57,10 @@ export class EnvService {
     return this.configService.getOrThrow<string>('AEROVIAS_URUGUAY_CSV_PATH')
   }
 
+  get aeroviasArgentinaCsvPath(): string {
+    return this.configService.getOrThrow<string>('AEROVIAS_ARGENTINA_CSV_PATH')
+  }
+
   get frontendOrigin(): string {
     return this.configService.get<string>('FRONTEND_ORIGIN', 'http://localhost:5173')
   }

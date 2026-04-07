@@ -1,12 +1,11 @@
 import { Injectable } from '@nestjs/common'
 import { XMLParser } from 'fast-xml-parser'
 import { readFile } from 'node:fs/promises'
+import * as XLSX from 'xlsx'
 import { EnvService } from '../config/env.service'
 import {
   AeroviaLinhaModel,
   AeroviasResponseModel,
-  AeroviaUruguayCsvRowModel,
-  AeroviaUruguayModel,
   AiswebItemModel,
   AiswebResponseModel,
   AeroportoModel,
@@ -66,7 +65,40 @@ export class NotamsService {
     parseTagValue: false,
   })
 
-  private readonly targetFirs = ['SBCW', 'SBBS', 'SBRE', 'SBAZ', 'SBAO']
+  private readonly brazilianFirs = new Set([
+    'SBCW',
+    'SBBS',
+    'SBRE',
+    'SBAZ',
+    'SBAO',
+  ])
+
+  private readonly targetFirs = [
+    'MHTG',
+    'MPZL',
+    'SACF',
+    'SAEF',
+    'SAMF',
+    'SARR',
+    'SARU',
+    'SAVF',
+    'SCCZ',
+    'SCEZ',
+    'SCFZ',
+    'SCTZ',
+    'SEGU',
+    'SGFA',
+    'SKEC',
+    'SKED',
+    'SLLF',
+    'SMPM',
+    'SOOO',
+    'SPIM',
+    'SUEO',
+    'SVZM',
+    'SYGC',
+  ]
+
   private readonly ignoredQCodes = new Set(['QAFTT'])
 
   private readonly restrictedSubjects = new Set([
@@ -113,13 +145,8 @@ export class NotamsService {
   }
 
   private isNotamWithinCurrentWindow(item: AiswebItemModel, now = new Date()): boolean {
-    const status = String(item.status ?? '').trim().toUpperCase()
     const validFrom = this.parseNotamDate(item.b)
     const validTo = this.parseNotamDate(item.c)
-
-    if (status && status !== 'ACTIVE') {
-      return false
-    }
 
     if (validFrom && now < validFrom) {
       return false
@@ -180,11 +207,32 @@ export class NotamsService {
     return this.targetFirs.includes(this.normalizeFir(value))
   }
 
+  private isBrazilianFir(value?: string | null): boolean {
+    return this.brazilianFirs.has(this.normalizeFir(value))
+  }
+
+  private isBrazilianIcao(value?: string | null): boolean {
+    const normalized = String(value ?? '').trim().toUpperCase()
+    return normalized.startsWith('SB')
+  }
+
+  private resolveDist(params?: { icaocode?: string; fir?: string }): 'N' | 'I' {
+    if (params?.fir) {
+      return this.isBrazilianFir(params.fir) ? 'N' : 'I'
+    }
+
+    if (params?.icaocode) {
+      return this.isBrazilianIcao(params.icaocode) ? 'N' : 'I'
+    }
+
+    return 'N'
+  }
+
   private extractTargetFirsFromLoc(loc?: string | null): string[] {
     const value = String(loc ?? '').trim().toUpperCase()
     if (!value) return []
 
-    const matches = value.match(/\bSB[A-Z]{2}\b/g) ?? []
+    const matches = value.match(/\b[A-Z]{4}\b/g) ?? []
     const unique = new Set<string>()
 
     for (const token of matches) {
@@ -211,21 +259,36 @@ export class NotamsService {
     return Array.from(resolved).sort()
   }
 
-  private buildAiswebUrl(icaocode?: string, minutes?: number): string {
-    const params = new URLSearchParams({
+  private buildAiswebUrl(params?: {
+    icaocode?: string
+    fir?: string
+    minutes?: number
+  }): string {
+    const query = new URLSearchParams({
       apiKey: this.envService.aiswebApiKey,
       apiPass: this.envService.aiswebApiPass,
       area: this.envService.aiswebArea,
-      dist: this.envService.aiswebDist,
-      all: this.envService.aiswebAll,
-      minutes: String(minutes ?? this.envService.aiswebMinutes),
+      dist: this.resolveDist(params),
     })
 
-    if (icaocode) {
-      params.set('icaocode', icaocode)
+    if (this.envService.aiswebAll) {
+      query.set('all', this.envService.aiswebAll)
     }
 
-    return `${this.envService.aiswebApiUrl}?${params.toString()}`
+    const minutes = params?.minutes ?? this.envService.aiswebMinutes
+    if (minutes !== undefined && minutes !== null) {
+      query.set('minutes', String(minutes))
+    }
+
+    if (params?.fir) {
+      query.set('fir', params.fir)
+    }
+
+    if (params?.icaocode) {
+      query.set('icaocode', params.icaocode)
+    }
+
+    return `${this.envService.aiswebApiUrl}?${query.toString()}`
   }
 
   private maskAiswebUrl(url: string): string {
@@ -366,18 +429,21 @@ export class NotamsService {
   }
 
   private async fetchRemoteNotamsXml(
-    icaocode?: string,
-    minutes?: number,
+    params?: {
+      icaocode?: string
+      fir?: string
+      minutes?: number
+    },
     maxAttempts = 4,
     timeoutMs = 20000,
   ): Promise<string> {
-    const url = this.buildAiswebUrl(icaocode, minutes)
-    const firLabel = icaocode || 'GERAL'
+    const url = this.buildAiswebUrl(params)
+    const label = params?.fir || params?.icaocode || 'GERAL'
     let lastError: unknown = null
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        console.log(`[NOTAM] Consultando FIR ${firLabel}`)
+        console.log(`[NOTAM] Consultando ${label}`)
         console.log('[NOTAM] URL:', this.maskAiswebUrl(url))
         console.log(`[NOTAM] Tentativa ${attempt}/${maxAttempts}`)
 
@@ -396,11 +462,11 @@ export class NotamsService {
         return xml
       } catch (error) {
         lastError = error
-        console.log(`[NOTAM] Erro ao consultar ${firLabel} na tentativa ${attempt}:`, error)
+        console.log(`[NOTAM] Erro ao consultar ${label} na tentativa ${attempt}:`, error)
 
         if (attempt < maxAttempts) {
           const waitMs = attempt * 2000
-          console.log(`[NOTAM] Nova tentativa para ${firLabel} em ${waitMs}ms`)
+          console.log(`[NOTAM] Nova tentativa para ${label} em ${waitMs}ms`)
           await this.sleep(waitMs)
         }
       }
@@ -409,8 +475,12 @@ export class NotamsService {
     throw lastError
   }
 
-  async fetchRemoteNotams(icaocode?: string, minutes?: number): Promise<AiswebItemModel[]> {
-    const xml = await this.fetchRemoteNotamsXml(icaocode, minutes)
+  async fetchRemoteNotams(params?: {
+    icaocode?: string
+    fir?: string
+    minutes?: number
+  }): Promise<AiswebItemModel[]> {
+    const xml = await this.fetchRemoteNotamsXml(params)
     const items = this.normalizeItems(xml)
 
     console.log('[NOTAM] Total bruto recebido da API:', items.length)
@@ -422,7 +492,7 @@ export class NotamsService {
 
     for (const fir of this.targetFirs) {
       try {
-        const items = await this.fetchRemoteNotams(fir, minutes)
+        const items = await this.fetchRemoteNotams({ fir, minutes })
         console.log(`[NOTAM] ${fir}: ${items.length} itens`)
         allItems.push(...items)
       } catch (error) {
@@ -435,9 +505,14 @@ export class NotamsService {
 
   async getRemoteNotams(params?: {
     icaocode?: string
+    fir?: string
     minutes?: number
   }): Promise<NotamModel[]> {
-    const items = await this.fetchRemoteNotams(params?.icaocode, params?.minutes)
+    const items = await this.fetchRemoteNotams({
+      icaocode: params?.icaocode,
+      fir: params?.fir,
+      minutes: params?.minutes,
+    })
 
     return items
       .filter((item) => this.isNotamWithinCurrentWindow(item))
@@ -934,12 +1009,10 @@ export class NotamsService {
   async findAreasFromApiByTargetFirs(minutes?: number): Promise<Record<string, AreaNotamApiModel[]>> {
     const items = await this.fetchRemoteNotamsFromAllTargetFirs(minutes)
 
-    const grouped: Record<string, AreaNotamApiModel[]> = {
-      SBCW: [],
-      SBBS: [],
-      SBRE: [],
-      SBAZ: [],
-      SBAO: [],
+    const grouped: Record<string, AreaNotamApiModel[]> = {}
+
+    for (const fir of this.targetFirs) {
+      grouped[fir] = []
     }
 
     const dedupe = new Set<string>()
@@ -978,6 +1051,10 @@ export class NotamsService {
       }
 
       for (const fir of resolvedFirs) {
+        if (!grouped[fir]) {
+          grouped[fir] = []
+        }
+
         const key = this.dedupeAreaKey(fir, item)
         if (dedupe.has(key)) continue
 
@@ -1051,10 +1128,21 @@ export class NotamsService {
       const latitude = Number(cols[idxLatitude] ?? '')
       const longitude = Number(cols[idxLongitude] ?? '')
 
-      if (!icao || !icao.startsWith('SB')) continue
-      if (isoCountry !== 'BR') continue
+      if (!icao) continue
+      if (
+        isoCountry !== 'BR' &&
+        isoCountry !== 'UY' &&
+        isoCountry !== 'AR' &&
+        isoCountry !== 'PY' &&
+        isoCountry !== 'CL'
+      ) continue
       if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
-      if (type === 'closed') continue
+      if (
+        type === 'closed' ||
+        type === 'seaplane_base' ||
+        type === 'heliport' ||
+        type === 'balloonport'
+      ) continue
 
       if (!byIcao.has(icao)) {
         byIcao.set(icao, {
@@ -1068,29 +1156,221 @@ export class NotamsService {
     return Array.from(byIcao.values()).sort((a, b) => a.icao.localeCompare(b.icao))
   }
 
+  async importAeroviasUruguay(): Promise<AeroviaLinhaModel[]> {
+    const csv = await this.fetchText(this.envService.aeroviasUruguayCsvPath)
+    const lines = csv.split(/\r?\n/).filter((line) => line.trim())
+
+    if (lines.length < 2) {
+      return []
+    }
+
+    const headers = this.splitCsvLine(lines[0]).map((h) =>
+      String(h).trim().toLowerCase(),
+    )
+
+    const idxNome = this.findHeaderIndex(headers, [
+      'nome',
+      'name',
+      'aerovia',
+      'aerovia_nome',
+      'airway',
+      'route',
+      'designator',
+      'text_designator',
+    ])
+
+    const idxLat = this.findHeaderIndex(headers, [
+      'latitude',
+      'lat',
+    ])
+
+    const idxLon = this.findHeaderIndex(headers, [
+      'longitude',
+      'lon',
+      'lng',
+    ])
+
+    const idxSeq = this.findHeaderIndex(headers, [
+      'sequencia',
+      'seq',
+      'ordem',
+      'order',
+      'index',
+    ])
+
+    if (idxNome < 0 || idxLat < 0 || idxLon < 0) {
+      return []
+    }
+
+    const grouped = new Map<string, Array<{ seq: number; coord: LatLon }>>()
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = this.splitCsvLine(lines[i])
+
+      const nome = String(cols[idxNome] ?? '')
+        .trim()
+        .toUpperCase()
+
+      const latitude = this.parseDecimalCell(cols[idxLat] ?? '')
+      const longitude = this.parseDecimalCell(cols[idxLon] ?? '')
+
+      if (!nome) continue
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
+      if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) continue
+
+      const seqRaw = idxSeq >= 0 ? cols[idxSeq] ?? '' : ''
+      const seqParsed = Number(String(seqRaw).replace(',', '.'))
+      const seq = Number.isFinite(seqParsed) ? seqParsed : i
+
+      const items = grouped.get(nome) ?? []
+      items.push({
+        seq,
+        coord: [latitude, longitude],
+      })
+      grouped.set(nome, items)
+    }
+
+    const result: AeroviaLinhaModel[] = []
+
+    for (const [nome, items] of grouped.entries()) {
+      const coords = items
+        .sort((a, b) => a.seq - b.seq)
+        .map((item) => item.coord)
+
+      const normalized = this.normalizeLineCoords(coords)
+
+      if (normalized.length >= 2) {
+        result.push({
+          nome,
+          coords_latlon: normalized,
+        })
+      }
+    }
+
+    return result.sort((a, b) => a.nome.localeCompare(b.nome))
+  }
+
+  private findHeaderIndex(headers: string[], candidates: string[]): number {
+    for (const candidate of candidates) {
+      const index = headers.indexOf(candidate)
+      if (index >= 0) return index
+    }
+
+    return -1
+  }
+
+  private normalizeLineCoords(coords: LatLon[]): LatLon[] {
+    const result: LatLon[] = []
+
+    for (const coord of coords) {
+      if (!this.isFiniteCoord(coord)) continue
+      this.pushUniqueCoord(result, coord)
+    }
+
+    return result
+  }
+
   async importWaypoints(): Promise<WaypointModel[]> {
-    return []
+    const buffer = await this.fetchBuffer(this.envService.waypointsUrl)
+    const workbook = XLSX.read(buffer, { type: 'buffer' })
+    const sheetName = workbook.SheetNames[0]
+
+    if (!sheetName) {
+      return []
+    }
+
+    const sheet = workbook.Sheets[sheetName]
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      defval: '',
+      raw: false,
+    })
+
+    const byIdent = new Map<string, WaypointModel>()
+
+    for (const row of rows) {
+      const ident = String(row.ident ?? row.IDENT ?? '')
+        .trim()
+        .toUpperCase()
+
+      const latitude = this.parseDecimalCell(row.latitude ?? row.LATITUDE)
+      const longitude = this.parseDecimalCell(row.longitude ?? row.LONGITUDE)
+
+      if (!ident) continue
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
+      if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) continue
+
+      if (!byIdent.has(ident)) {
+        byIdent.set(ident, {
+          ident,
+          latitude,
+          longitude,
+        })
+      }
+    }
+
+    return Array.from(byIdent.values()).sort((a, b) => a.ident.localeCompare(b.ident))
   }
 
   async importRpl(): Promise<RotaRplModel[]> {
-    const [text, aeroportos] = await Promise.all([
+    const [text, aeroportos, waypoints] = await Promise.all([
       this.fetchText(this.envService.rplUrl),
       this.importAeroportos(),
+      this.importWaypoints(),
     ])
 
-    const airportMap = new Map(aeroportos.map((a) => [a.icao, a]))
-    const waypointMap = new Map<string, WaypointModel>()
+    const airportMap = new Map(
+      aeroportos.map((a) => [a.icao.trim().toUpperCase(), a]),
+    )
+
+    const waypointMap = new Map(
+      waypoints.map((w) => [w.ident.trim().toUpperCase(), w]),
+    )
+
     const registros = this.parseRplRecords(text)
     const result: RotaRplModel[] = []
 
     for (const registro of registros) {
-      const rota = this.parseRplRecord(registro, airportMap, waypointMap)
+      const rota = this.parseRplRecord(
+        registro,
+        airportMap,
+        waypointMap,
+      )
+
       if (rota && rota.coords_latlon.length >= 2) {
         result.push(rota)
       }
     }
 
     return result
+  }
+
+  private parseDecimalCell(value: unknown): number {
+    if (typeof value === 'number') {
+      return value
+    }
+
+    const raw = String(value ?? '').trim()
+    if (!raw) return Number.NaN
+
+    const onlyComma = /^-?\d+(,\d+)?$/.test(raw)
+    if (onlyComma) {
+      const result = Number(raw.replace(',', '.'))
+      return Number.isFinite(result) ? result : Number.NaN
+    }
+
+    const onlyDot = /^-?\d+(\.\d+)?$/.test(raw)
+    if (onlyDot) {
+      const result = Number(raw)
+      return Number.isFinite(result) ? result : Number.NaN
+    }
+
+    const normalized = raw
+      .replace(/\s/g, '')
+      .replace(/\./g, '')
+      .replace(',', '.')
+
+    const result = Number(normalized)
+    return Number.isFinite(result) ? result : Number.NaN
   }
 
   private async fetchJson<T>(url: string): Promise<T> {
@@ -1147,7 +1427,7 @@ export class NotamsService {
     return [Number(coordinate[1]), Number(coordinate[0])]
   }
 
-  private extractAeroviaName(properties?: Record<string, any>): string {
+  private extractAeroviaName(properties?: Record<string, unknown>): string {
     const candidates = [
       properties?.nome,
       properties?.name,
@@ -1166,7 +1446,9 @@ export class NotamsService {
       }
     }
 
-    return properties?.text_designator ? String(properties.text_designator).trim() : 'NOME DESCONHECIDO'
+    return properties?.text_designator
+      ? String(properties.text_designator).trim()
+      : 'NOME DESCONHECIDO'
   }
 
   private geometryToLines(geometry?: GeoJsonGeometryModel | null): LatLon[][] {
@@ -1370,13 +1652,13 @@ export class NotamsService {
     for (const point of points) {
       const airport = airportMap.get(point)
       if (airport) {
-        coords.push([airport.latitude, airport.longitude])
+        this.pushUniqueCoord(coords, [airport.latitude, airport.longitude])
         continue
       }
 
       const waypoint = waypointMap.get(point)
       if (waypoint) {
-        coords.push([waypoint.latitude, waypoint.longitude])
+        this.pushUniqueCoord(coords, [waypoint.latitude, waypoint.longitude])
       }
     }
 
@@ -1461,6 +1743,125 @@ export class NotamsService {
       icao: match[1],
       hora: match[2],
     }
+  }
+
+  async importAeroviasArgentina(): Promise<AeroviaLinhaModel[]> {
+    const csv = await this.fetchText(this.envService.aeroviasArgentinaCsvPath)
+
+    const sanitizeHeader = (value: unknown): string =>
+      String(value ?? '')
+        .replace(/^\uFEFF/, '')
+        .replace(/^ï»¿/, '')
+        .trim()
+        .toLowerCase()
+
+    const sanitizeCell = (value: unknown): string =>
+      String(value ?? '')
+        .replace(/^\uFEFF/, '')
+        .replace(/^ï»¿/, '')
+        .trim()
+
+    const lines = String(csv ?? '')
+      .split(/\r?\n/)
+      .filter((line) => line.trim())
+
+    console.log('ARGENTINA PATH:', this.envService.aeroviasArgentinaCsvPath)
+    console.log('ARGENTINA TOTAL LINES:', lines.length)
+
+    if (lines.length < 2) {
+      console.log('ARGENTINA CSV vazio ou sem dados')
+      return []
+    }
+
+    const headers = this.splitCsvLine(lines[0]).map(sanitizeHeader)
+
+    console.log('ARGENTINA HEADERS:', headers)
+
+    const idxNome = this.findHeaderIndex(headers, [
+      'route',
+      'nome',
+      'name',
+      'aerovia',
+      'aerovia_nome',
+      'airway',
+      'designator',
+      'text_designator',
+    ])
+
+    const idxLat = this.findHeaderIndex(headers, [
+      'latitude',
+      'lat',
+    ])
+
+    const idxLon = this.findHeaderIndex(headers, [
+      'longitude',
+      'lon',
+      'lng',
+    ])
+
+    const idxSeq = this.findHeaderIndex(headers, [
+      'seq',
+      'sequencia',
+      'ordem',
+      'order',
+      'index',
+    ])
+
+    console.log('ARGENTINA IDX NOME:', idxNome)
+    console.log('ARGENTINA IDX LAT:', idxLat)
+    console.log('ARGENTINA IDX LON:', idxLon)
+    console.log('ARGENTINA IDX SEQ:', idxSeq)
+
+    if (idxNome < 0 || idxLat < 0 || idxLon < 0) {
+      console.log('ARGENTINA headers obrigatórios não encontrados')
+      return []
+    }
+
+    const grouped = new Map<string, Array<{ seq: number; coord: LatLon }>>()
+
+    for (let i = 1; i < lines.length; i++) {
+      const cols = this.splitCsvLine(lines[i])
+
+      const nome = sanitizeCell(cols[idxNome]).toUpperCase()
+      const latitude = this.parseDecimalCell(cols[idxLat] ?? '')
+      const longitude = this.parseDecimalCell(cols[idxLon] ?? '')
+
+      if (!nome) continue
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
+      if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) continue
+
+      const seqRaw = idxSeq >= 0 ? sanitizeCell(cols[idxSeq]) : ''
+      const seqParsed = Number(String(seqRaw).replace(',', '.'))
+      const seq = Number.isFinite(seqParsed) ? seqParsed : i
+
+      const items = grouped.get(nome) ?? []
+      items.push({
+        seq,
+        coord: [latitude, longitude],
+      })
+      grouped.set(nome, items)
+    }
+
+    const result: AeroviaLinhaModel[] = []
+
+    for (const [nome, items] of grouped.entries()) {
+      const coords = items
+        .sort((a, b) => a.seq - b.seq)
+        .map((item) => item.coord)
+
+      const normalized = this.normalizeLineCoords(coords)
+
+      if (normalized.length >= 2) {
+        result.push({
+          nome,
+          coords_latlon: normalized,
+        })
+      }
+    }
+
+    console.log('ARGENTINA TOTAL AEROVIAS:', result.length)
+
+    return result.sort((a, b) => a.nome.localeCompare(b.nome))
   }
 
   private extractFlightLevel(token: string): string {
@@ -1563,5 +1964,13 @@ export class NotamsService {
     const mm = total % 60
 
     return `${String(hh).padStart(2, '0')}${String(mm).padStart(2, '0')}`
+  }
+
+  async refresh(minutes?: number): Promise<{ total: number }> {
+    const grouped = await this.findAreasFromApiByTargetFirs(minutes)
+
+    return {
+      total: Object.values(grouped).reduce((acc, items) => acc + items.length, 0),
+    }
   }
 }

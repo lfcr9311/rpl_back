@@ -1,0 +1,166 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum AirwayLevel {
+  LOW
+  HIGH
+  UNKNOWN
+}
+
+enum RouteNotamDecisionStatus {
+  PENDING
+  RESOLVED
+  IGNORED
+}
+
+model Notam {
+  id            String   @id @default(cuid())
+  externalId    String   @unique
+  number        String?
+  fir           String?
+  location      String?
+  qcode         String?
+  category      String?
+  dist          String?
+  type          String?
+  status        String?
+  issuedAt      DateTime?
+  validFrom     DateTime?
+  validTo       DateTime?
+  validFromRaw  String?
+  validToRaw    String?
+  dailyWindow   String?
+  textE         String?
+  lowerLimit    String?
+  upperLimit    String?
+  geoRaw        String?
+  areaType      String?
+  geometryType  String?
+  centerLat     Float?
+  centerLon     Float?
+  radiusM       Float?
+  coordsJson    Json?
+  rawPayload    Json?
+  isChecked     Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  decisions     RouteNotamDecision[]
+
+  @@index([number])
+  @@index([fir])
+  @@index([qcode])
+  @@index([validFrom])
+  @@index([validTo])
+}
+
+model Airport {
+  id         String   @id @default(cuid())
+  icao       String   @unique
+  name       String?
+  country    String?
+  latitude   Float
+  longitude  Float
+  elevation  Float?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([icao])
+  @@index([country])
+}
+
+model Fix {
+  id         String   @id @default(cuid())
+  ident      String   @unique
+  name       String?
+  country    String?
+  latitude   Float
+  longitude  Float
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  airwayPoints AirwayPoint[]
+
+  @@index([ident])
+  @@index([country])
+}
+
+model Airway {
+  id         String      @id @default(cuid())
+  code       String
+  country    String?
+  source     String?
+  level      AirwayLevel @default(UNKNOWN)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  points     AirwayPoint[]
+
+  @@unique([code, country, source, level])
+  @@index([code])
+  @@index([country])
+  @@index([source])
+}
+
+model AirwayPoint {
+  id         String   @id @default(cuid())
+  airwayId   String
+  fixId      String?
+  seq        Int
+  latitude   Float
+  longitude  Float
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  airway     Airway   @relation(fields: [airwayId], references: [id], onDelete: Cascade)
+  fix        Fix?     @relation(fields: [fixId], references: [id], onDelete: SetNull)
+
+  @@unique([airwayId, seq])
+  @@index([airwayId])
+  @@index([fixId])
+}
+
+model ManualRoute {
+  id             String   @id @default(cuid())
+  nome           String
+  origem         String
+  destino        String
+  rotaTexto      String
+  rawTokensJson  Json
+  usedTokensJson Json
+  coordsJson     Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  decisions      RouteNotamDecision[]
+
+  @@index([origem])
+  @@index([destino])
+}
+
+model RouteNotamDecision {
+  id             String                   @id @default(cuid())
+  routeKey       String
+  routeIdent     String?
+  origem         String?
+  destino        String?
+  notamId        String
+  manualRouteId  String?
+  status         RouteNotamDecisionStatus @default(PENDING)
+  notes          String?
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  notam          Notam                    @relation(fields: [notamId], references: [id], onDelete: Cascade)
+  manualRoute    ManualRoute?             @relation(fields: [manualRouteId], references: [id], onDelete: SetNull)
+
+  @@unique([routeKey, notamId])
+  @@index([routeKey])
+  @@index([notamId])
+  @@index([status])
+}
