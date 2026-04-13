@@ -26,18 +26,65 @@ export class NotamsController {
   }
 
   @Post('refresh')
-  refresh() {
-    return this.notamsService.findAreasFromApiByTargetFirs()
+  refresh(
+    @Query('minutes') minutes?: string,
+    @Query('includeRead') includeRead?: string,
+  ) {
+    const parsedMinutes =
+      minutes && !Number.isNaN(Number(minutes)) ? Number(minutes) : undefined
+
+    const incluirLidos =
+      String(includeRead ?? '').trim().toLowerCase() === 'true'
+
+    return this.notamsService.findAreasFromApiByTargetFirs(parsedMinutes, {
+      incluirLidos,
+    })
   }
 
   @Get('notams')
-  findAll() {
-    return this.notamsService.getRemoteNotams()
+  findAll(
+    @Query('icaocode') icaocode?: string,
+    @Query('minutes') minutes?: string,
+  ) {
+    const parsedMinutes =
+      minutes && !Number.isNaN(Number(minutes)) ? Number(minutes) : undefined
+
+    return this.notamsService.getRemoteNotams({
+      icaocode: icaocode?.trim().toUpperCase(),
+      minutes: parsedMinutes,
+    })
   }
 
   @Get('firs')
-  findNotamsByFirs() {
-    return this.notamsService.findAreasFromApiByTargetFirs()
+  findNotamsByFirs(
+    @Query('minutes') minutes?: string,
+    @Query('includeRead') includeRead?: string,
+  ) {
+    const parsedMinutes =
+      minutes && !Number.isNaN(Number(minutes)) ? Number(minutes) : undefined
+
+    const incluirLidos =
+      String(includeRead ?? '').trim().toLowerCase() === 'true'
+
+    return this.notamsService.findAreasFromApiByTargetFirs(parsedMinutes, {
+      incluirLidos,
+    })
+  }
+
+  @Get('areas')
+  findAreas(
+    @Query('minutes') minutes?: string,
+    @Query('includeRead') includeRead?: string,
+  ) {
+    const parsedMinutes =
+      minutes && !Number.isNaN(Number(minutes)) ? Number(minutes) : undefined
+
+    const incluirLidos =
+      String(includeRead ?? '').trim().toLowerCase() === 'true'
+
+    return this.notamsService.findAreasFromApiByTargetFirs(parsedMinutes, {
+      incluirLidos,
+    })
   }
 
   @Get('aerovias/alta')

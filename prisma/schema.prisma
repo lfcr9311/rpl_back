@@ -1,0 +1,23 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+
+model NotamReadState {
+  id          String   @id @default(cuid())
+  sourceId    String
+  numeroNotam String
+  fir         String?
+  lido        Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([sourceId, numeroNotam])
+  @@index([lido])
+  @@index([numeroNotam])
+  @@index([sourceId])
+}

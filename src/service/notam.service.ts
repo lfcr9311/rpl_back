@@ -19,6 +19,7 @@ import {
   WaypointModel,
 } from '../models/notams/aisweb-response.model'
 import { NotamModel } from '../models/notams/notam'
+import { NotamReadStateService } from './notam-read-state.service'
 
 type GeometryParserType =
   | 'geojson'
@@ -57,7 +58,10 @@ type ExtractedGeometry =
 
 @Injectable()
 export class NotamsService {
-  constructor(private readonly envService: EnvService) {}
+  constructor(
+    private readonly envService: EnvService,
+    private readonly notamReadStateService: NotamReadStateService,
+  ) {}
 
   private readonly parser = new XMLParser({
     ignoreAttributes: false,
@@ -84,6 +88,10 @@ export class NotamsService {
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  private normalizeReadKey(sourceId?: string | null, numeroNotam?: string | null): string {
+    return `${String(sourceId ?? '').trim()}::${String(numeroNotam ?? '').trim().toUpperCase()}`
   }
 
   private parseNotamDate(raw?: string | null): Date | null {
@@ -931,8 +939,13 @@ export class NotamsService {
     return `${fir}::${numero}::${id}`
   }
 
-  async findAreasFromApiByTargetFirs(minutes?: number): Promise<Record<string, AreaNotamApiModel[]>> {
+  async findAreasFromApiByTargetFirs(
+    minutes?: number,
+    options?: { incluirLidos?: boolean },
+  ): Promise<Record<string, AreaNotamApiModel[]>> {
     const items = await this.fetchRemoteNotamsFromAllTargetFirs(minutes)
+    const readMap = await this.notamReadStateService.getReadMap()
+    const incluirLidos = options?.incluirLidos ?? false
 
     const grouped: Record<string, AreaNotamApiModel[]> = {
       SBCW: [],
@@ -949,11 +962,14 @@ export class NotamsService {
       const qcode = this.normalizeQCode(item.cod)
       const resolvedFirs = this.resolveItemTargetFirs(item)
       const areaKind = this.inferAreaKindFromQCode(qcode, item.e)
+      const sourceId = String(item.id ?? '').trim()
+      const lido = readMap.has(this.normalizeReadKey(sourceId, numero))
 
       if (!resolvedFirs.length) continue
       if (!this.isNotamWithinCurrentWindow(item)) continue
       if (this.isIgnoredQCode(qcode)) continue
       if (!this.isAreaQCode(qcode, item.e)) continue
+      if (!incluirLidos && lido) continue
 
       const geometry = this.extractGeometryFromItem(item)
 
@@ -997,6 +1013,7 @@ export class NotamsService {
           geometry_type: geometry.parser === 'circle' ? 'CIRCLE' : 'POLYGON',
           center: geometry.center,
           radius_m: geometry.radius_m,
+          lido,
         } as AreaNotamApiModel)
       }
     }
