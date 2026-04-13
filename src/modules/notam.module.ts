@@ -5,9 +5,9 @@ import { NotamsController } from '../controller/notam.controller'
 import { NotamGeometryService } from '../service/notam-geometry.service'
 import { NotamHttpService } from '../service/notam-http.service'
 import { ConfigModule } from '@nestjs/config'
-import { NotamReadStateController } from 'src/controller/notam-read-state.controller'
-import { NotamReadStateService } from 'src/service/notam-read-state.service'
 import { PrismaService } from '../config/prisma.service'
+import { NotamReadStateService } from '../service/notam-read-state.service'
+import { NotamReadStateController } from '../controller/notam-read-state.controller'
 
 @Module({
   imports: [ConfigModule],
