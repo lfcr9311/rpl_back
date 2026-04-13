@@ -7,7 +7,7 @@ import { NotamHttpService } from '../service/notam-http.service'
 import { ConfigModule } from '@nestjs/config'
 import { NotamReadStateController } from 'src/controller/notam-read-state.controller'
 import { NotamReadStateService } from 'src/service/notam-read-state.service'
-import { PrismaService } from 'src/config/prisma.service'
+import { PrismaService } from '../config/prisma.service'
 
 @Module({
   imports: [ConfigModule],

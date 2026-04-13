@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common'
-import { PrismaService } from 'src/config/prisma.service'
+import { PrismaService } from '../config/prisma.service'
 
 type SetReadStateInput = {
   sourceId?: string | null
