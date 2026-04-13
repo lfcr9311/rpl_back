@@ -6,7 +6,6 @@ datasource db {
   provider = "postgresql"
 }
 
-
 model NotamReadState {
   id          String   @id @default(cuid())
   sourceId    String
