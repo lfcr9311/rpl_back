@@ -4,6 +4,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model NotamReadState {
@@ -16,7 +17,4 @@ model NotamReadState {
   updatedAt   DateTime @updatedAt
 
   @@unique([sourceId, numeroNotam])
-  @@index([lido])
-  @@index([numeroNotam])
-  @@index([sourceId])
 }

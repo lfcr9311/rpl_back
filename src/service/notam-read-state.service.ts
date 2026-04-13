@@ -93,4 +93,8 @@ export class NotamReadStateService {
 
     return map
   }
+
+  async getReadMap(fir?: string) {
+    return this.buildReadStateMap(fir)
+  }
 }
