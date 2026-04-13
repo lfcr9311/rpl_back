@@ -66,6 +66,10 @@ export class NotamReadStateService {
     })
   }
 
+  async getReadStates(fir?: string) {
+    return this.listReadStates(fir)
+  }
+
   async buildReadStateMap(fir?: string) {
     const normalizedFir = this.normalizeOptionalString(fir)?.toUpperCase()
 
