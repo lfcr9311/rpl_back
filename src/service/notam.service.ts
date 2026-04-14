@@ -1090,52 +1090,49 @@ export class NotamsService {
   }
 
   async importWaypoints(): Promise<WaypointModel[]> {
-    const source =
-      (this.envService as any).waypointsUrl ||
-      (this.envService as any).waypointsPath ||
-      (this.envService as any).waypointsFile ||
-      (this.envService as any).waypointFile ||
-      (this.envService as any).waypointXlsxPath
+  const source = this.envService.waypointsUrl
 
-    if (!source) {
-      return []
-    }
+  if (!source || !/^https?:\/\//i.test(source)) {
+    throw new Error('WAYPOINTS_URL inválido ou não configurado')
+  }
 
-    const xlsx = await import('xlsx')
-    const buffer = await this.fetchBuffer(source)
-    const workbook = xlsx.read(buffer, { type: 'buffer' })
+  const xlsx = await import('xlsx')
+  const buffer = await this.fetchBuffer(source)
+  const workbook = xlsx.read(buffer, { type: 'buffer' })
 
-    const result = new Map<string, WaypointModel>()
+  const result = new Map<string, WaypointModel>()
 
-    for (const sheetName of workbook.SheetNames) {
-      const sheet = workbook.Sheets[sheetName]
-      if (!sheet) continue
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName]
+    if (!sheet) continue
 
-      const rows = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-        defval: '',
-        raw: false,
-      })
+    const rows = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+      defval: '',
+      raw: false,
+    })
 
-      for (const row of rows) {
-        const ident = this.extractWaypointIdent(row)
-        const latitude = this.extractWaypointLatitude(row)
-        const longitude = this.extractWaypointLongitude(row)
+    for (const row of rows) {
+      const ident = this.extractWaypointIdent(row)
+      const latitude = this.extractWaypointLatitude(row)
+      const longitude = this.extractWaypointLongitude(row)
 
-        if (!ident) continue
-        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
+      if (!ident) continue
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
 
-        if (!result.has(ident)) {
-          result.set(ident, {
-            ident,
-            latitude,
-            longitude,
-          })
-        }
+      if (!result.has(ident)) {
+        result.set(ident, {
+          ident,
+          latitude,
+          longitude,
+        })
       }
     }
-
-    return Array.from(result.values()).sort((a, b) => a.ident.localeCompare(b.ident))
   }
+
+  return Array.from(result.values()).sort((a, b) =>
+    a.ident.localeCompare(b.ident),
+  )
+}
 
   async importRpl(): Promise<RotaRplModel[]> {
     const [text, aeroportos, waypoints] = await Promise.all([
