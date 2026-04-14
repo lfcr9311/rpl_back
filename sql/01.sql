@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS notam_read_state (
+CREATE TABLE IF NOT EXISTS NotamReadState (
   id TEXT PRIMARY KEY,
   source_id TEXT NOT NULL,
   numero_notam TEXT NOT NULL,
@@ -8,8 +8,8 @@ CREATE TABLE IF NOT EXISTS notam_read_state (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS ux_notam_read_state_source_numero
-  ON notam_read_state (source_id, numero_notam);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_NotamReadState_source_numero
+  ON NotamReadState (source_id, numero_notam);
 
-CREATE INDEX IF NOT EXISTS ix_notam_read_state_fir
-  ON notam_read_state (fir);
+CREATE INDEX IF NOT EXISTS ix_NotamReadState_fir
+  ON NotamReadState (fir);

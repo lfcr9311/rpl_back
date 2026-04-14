@@ -94,6 +94,10 @@ export class NotamsService {
     return `${String(sourceId ?? '').trim()}::${String(numeroNotam ?? '').trim().toUpperCase()}`
   }
 
+  private normalizeIdent(value?: string | null): string {
+    return String(value ?? '').trim().toUpperCase()
+  }
+
   private parseNotamDate(raw?: string | null): Date | null {
     if (!raw) return null
 
@@ -1086,17 +1090,68 @@ export class NotamsService {
   }
 
   async importWaypoints(): Promise<WaypointModel[]> {
-    return []
+    const source =
+      (this.envService as any).waypointsUrl ||
+      (this.envService as any).waypointsPath ||
+      (this.envService as any).waypointsFile ||
+      (this.envService as any).waypointFile ||
+      (this.envService as any).waypointXlsxPath
+
+    if (!source) {
+      return []
+    }
+
+    const xlsx = await import('xlsx')
+    const buffer = await this.fetchBuffer(source)
+    const workbook = xlsx.read(buffer, { type: 'buffer' })
+
+    const result = new Map<string, WaypointModel>()
+
+    for (const sheetName of workbook.SheetNames) {
+      const sheet = workbook.Sheets[sheetName]
+      if (!sheet) continue
+
+      const rows = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+        defval: '',
+        raw: false,
+      })
+
+      for (const row of rows) {
+        const ident = this.extractWaypointIdent(row)
+        const latitude = this.extractWaypointLatitude(row)
+        const longitude = this.extractWaypointLongitude(row)
+
+        if (!ident) continue
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
+
+        if (!result.has(ident)) {
+          result.set(ident, {
+            ident,
+            latitude,
+            longitude,
+          })
+        }
+      }
+    }
+
+    return Array.from(result.values()).sort((a, b) => a.ident.localeCompare(b.ident))
   }
 
   async importRpl(): Promise<RotaRplModel[]> {
-    const [text, aeroportos] = await Promise.all([
+    const [text, aeroportos, waypoints] = await Promise.all([
       this.fetchText(this.envService.rplUrl),
       this.importAeroportos(),
+      this.importWaypoints(),
     ])
 
-    const airportMap = new Map(aeroportos.map((a) => [a.icao, a]))
-    const waypointMap = new Map<string, WaypointModel>()
+    const airportMap = new Map(
+      aeroportos.map((a) => [this.normalizeIdent(a.icao), a]),
+    )
+
+    const waypointMap = new Map(
+      waypoints.map((w) => [this.normalizeIdent(w.ident), w]),
+    )
+
     const registros = this.parseRplRecords(text)
     const result: RotaRplModel[] = []
 
@@ -1383,17 +1438,18 @@ export class NotamsService {
     )
 
     const coords: LatLon[] = []
+    const seen = new Set<string>()
 
     for (const point of points) {
       const airport = airportMap.get(point)
       if (airport) {
-        coords.push([airport.latitude, airport.longitude])
+        this.pushUniqueRouteCoord(coords, seen, [airport.latitude, airport.longitude])
         continue
       }
 
       const waypoint = waypointMap.get(point)
       if (waypoint) {
-        coords.push([waypoint.latitude, waypoint.longitude])
+        this.pushUniqueRouteCoord(coords, seen, [waypoint.latitude, waypoint.longitude])
       }
     }
 
@@ -1423,10 +1479,20 @@ export class NotamsService {
   }
 
   private pushUniquePoint(points: string[], value: string) {
-    const normalized = String(value ?? '').trim().toUpperCase()
+    const normalized = this.normalizeIdent(value)
     if (!normalized) return
     if (points[points.length - 1] === normalized) return
     points.push(normalized)
+  }
+
+  private pushUniqueRouteCoord(coords: LatLon[], seen: Set<string>, coord: LatLon) {
+    if (!this.isFiniteCoord(coord)) return
+
+    const key = `${coord[0].toFixed(6)},${coord[1].toFixed(6)}`
+    if (seen.has(key)) return
+
+    seen.add(key)
+    coords.push(coord)
   }
 
   private findFirstAdep(
@@ -1519,26 +1585,49 @@ export class NotamsService {
   }
 
   private isAirwayToken(token: string): boolean {
-    return /^[A-Z]{1,3}\d{1,4}$/.test(token)
+    return /^[A-Z]{1,3}\d{1,4}[A-Z]?$/.test(token)
   }
 
   private isValidRouteToken(token: string): boolean {
     if (!token) return false
     if (token === 'DCT' || token === 'IFR' || token === 'VFR' || token === 'C' || token === 'NIL') return false
     if (/^N\d{4}$/i.test(token)) return false
+    if (/^K\d{4}$/i.test(token)) return false
     if (/^M\d{3}$/i.test(token)) return false
     if (/^F\d{3,4}$/i.test(token)) return false
+    if (/^A\d{3,4}$/i.test(token)) return false
+    if (/^S\d{3,4}$/i.test(token)) return false
     if (/^\d{2,4}$/.test(token)) return false
     if (/^[A-Z]{4}\d{4}$/.test(token)) return false
     if (this.isAirwayToken(token)) return false
     if (/^EQPT$/i.test(token)) return false
     if (/^PBN$/i.test(token)) return false
     if (/^EET$/i.test(token)) return false
+    if (/^DOF$/i.test(token)) return false
+    if (/^STS$/i.test(token)) return false
+    if (/^RMK$/i.test(token)) return false
+    if (/^REG$/i.test(token)) return false
+    if (/^SEL$/i.test(token)) return false
+    if (/^OPR$/i.test(token)) return false
+    if (/^ORGN$/i.test(token)) return false
+    if (/^RALT$/i.test(token)) return false
+    if (/^TALT$/i.test(token)) return false
+    if (/^CODE$/i.test(token)) return false
+    if (/^NAV$/i.test(token)) return false
+    if (/^COM$/i.test(token)) return false
+    if (/^DAT$/i.test(token)) return false
+    if (/^SUR$/i.test(token)) return false
+    if (/^DEP$/i.test(token)) return false
+    if (/^DEST$/i.test(token)) return false
+    if (/^ALTN$/i.test(token)) return false
+    if (/^TYP$/i.test(token)) return false
+    if (/^RIF$/i.test(token)) return false
     if (/^EQPT\/.+/i.test(token)) return false
     if (/^PBN\/.+/i.test(token)) return false
     if (/^EET\/.+/i.test(token)) return false
     if (/^STS\/.+/i.test(token)) return false
     if (/^RMK\/.+/i.test(token)) return false
+    if (/^DOF\/.+/i.test(token)) return false
     return true
   }
 
@@ -1546,19 +1635,21 @@ export class NotamsService {
     const result: string[] = []
 
     for (const raw of tokens) {
-      const token = String(raw ?? '').trim().toUpperCase()
+      const token = this.normalizeIdent(raw)
       if (!token) continue
 
-      if (token.includes('/')) {
-        const left = token.split('/', 1)[0]
+      const normalized = token.replace(/[.,;]+$/g, '')
+
+      if (normalized.includes('/')) {
+        const left = normalized.split('/', 1)[0]
         if (this.isValidRouteToken(left)) {
           result.push(left)
         }
         continue
       }
 
-      if (this.isValidRouteToken(token)) {
-        result.push(token)
+      if (this.isValidRouteToken(normalized)) {
+        result.push(normalized)
       }
     }
 
@@ -1580,5 +1671,102 @@ export class NotamsService {
     const mm = total % 60
 
     return `${String(hh).padStart(2, '0')}${String(mm).padStart(2, '0')}`
+  }
+
+  private extractWaypointIdent(row: Record<string, unknown>): string {
+    const candidates = [
+      row.ident,
+      row.Ident,
+      row.IDENT,
+      row.waypoint,
+      row.WAYPOINT,
+      row.nome,
+      row.NOME,
+      row.name,
+      row.NAME,
+      row.fix,
+      row.FIX,
+    ]
+
+    for (const value of candidates) {
+      const ident = this.normalizeIdent(String(value ?? ''))
+      if (ident) {
+        return ident
+      }
+    }
+
+    return ''
+  }
+
+  private extractWaypointLatitude(row: Record<string, unknown>): number {
+    const candidates = [
+      row.latitude,
+      row.LATITUDE,
+      row.lat,
+      row.LAT,
+      row.latitude_deg,
+      row.LATITUDE_DEG,
+      row.y,
+      row.Y,
+    ]
+
+    for (const value of candidates) {
+      const parsed = this.parseCoordinateValue(value)
+      if (Number.isFinite(parsed)) {
+        return parsed
+      }
+    }
+
+    return Number.NaN
+  }
+
+  private extractWaypointLongitude(row: Record<string, unknown>): number {
+    const candidates = [
+      row.longitude,
+      row.LONGITUDE,
+      row.lon,
+      row.LON,
+      row.lng,
+      row.LNG,
+      row.longitude_deg,
+      row.LONGITUDE_DEG,
+      row.x,
+      row.X,
+    ]
+
+    for (const value of candidates) {
+      const parsed = this.parseCoordinateValue(value)
+      if (Number.isFinite(parsed)) {
+        return parsed
+      }
+    }
+
+    return Number.NaN
+  }
+
+  private parseCoordinateValue(value: unknown): number {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : Number.NaN
+    }
+
+    const text = String(value ?? '').trim()
+    if (!text) return Number.NaN
+
+    const direct = Number(text.replace(',', '.'))
+    if (Number.isFinite(direct)) {
+      return direct
+    }
+
+    const dms = this.parseCompactDmsToken(text)
+    if (dms) {
+      if (/[NS]/i.test(text) && !/[EW]/i.test(text)) {
+        return dms[0]
+      }
+      if (/[EW]/i.test(text) && !/[NS]/i.test(text)) {
+        return dms[1]
+      }
+    }
+
+    return Number.NaN
   }
 }

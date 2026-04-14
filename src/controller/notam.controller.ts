@@ -1,9 +1,20 @@
-import { Controller, Get, Post, Query } from '@nestjs/common'
+import { Body, Controller, Get, Post, Query } from '@nestjs/common'
 import { NotamsService } from '../service/notam.service'
+import { NotamReadStateService } from '../service/notam-read-state.service'
+
+type SetReadStateBody = {
+  sourceId?: string | null
+  numeroNotam: string
+  fir?: string | null
+  lido: boolean
+}
 
 @Controller('notams')
 export class NotamsController {
-  constructor(private readonly notamsService: NotamsService) {}
+  constructor(
+    private readonly notamsService: NotamsService,
+    private readonly notamReadStateService: NotamReadStateService,
+  ) {}
 
   @Get()
   findRemote(
@@ -84,6 +95,21 @@ export class NotamsController {
 
     return this.notamsService.findAreasFromApiByTargetFirs(parsedMinutes, {
       incluirLidos,
+    })
+  }
+
+  @Get('read-states')
+  getReadStates(@Query('fir') fir?: string) {
+    return this.notamReadStateService.getReadStates(fir)
+  }
+
+  @Post('read-state')
+  setReadState(@Body() body: SetReadStateBody) {
+    return this.notamReadStateService.setReadState({
+      sourceId: body.sourceId,
+      numeroNotam: body.numeroNotam,
+      fir: body.fir,
+      lido: body.lido,
     })
   }
 
