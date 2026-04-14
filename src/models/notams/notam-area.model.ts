@@ -10,5 +10,11 @@ export type AreaNotamApiModel = {
   q_line: string
   coords_latlon: LatLon[]
   texto_notam: string
+  f: string
+  g: string
   source_id: string
+  geometry_type: 'POLYGON' | 'CIRCLE'
+  center: LatLon | null
+  radius_m: number | null
+  lido: boolean
 }
