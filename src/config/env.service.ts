@@ -64,4 +64,8 @@ export class EnvService {
   get port(): number {
     return Number(this.configService.get<string>('PORT', '8000'))
   }
+
+  get firsLatLong(): string {
+    return this.configService.getOrThrow<string>('FIRS')
+  }
 }

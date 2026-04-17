@@ -44,24 +44,24 @@ type AreaKind =
 
 type ExtractedGeometry =
   | {
-    parser: 'circle'
-    coords: []
-    center: LatLon
-    radius_m: number
-  }
+      parser: 'circle'
+      coords: []
+      center: LatLon
+      radius_m: number
+    }
   | {
-    parser: Exclude<GeometryParserType, 'circle'>
-    coords: LatLon[]
-    center: null
-    radius_m: null
-  }
+      parser: Exclude<GeometryParserType, 'circle'>
+      coords: LatLon[]
+      center: null
+      radius_m: null
+    }
 
 @Injectable()
 export class NotamsService {
   constructor(
     private readonly envService: EnvService,
     private readonly notamReadStateService: NotamReadStateService,
-  ) { }
+  ) {}
 
   private readonly parser = new XMLParser({
     ignoreAttributes: false,
@@ -90,12 +90,34 @@ export class NotamsService {
     return new Promise((resolve) => setTimeout(resolve, ms))
   }
 
-  private normalizeReadKey(sourceId?: string | null, numeroNotam?: string | null): string {
-    return `${String(sourceId ?? '').trim()}::${String(numeroNotam ?? '').trim().toUpperCase()}`
+  private normalizeReadKey(
+    sourceId?: string | null,
+    numeroNotam?: string | null,
+  ): string {
+    return `${String(sourceId ?? '').trim()}::${String(numeroNotam ?? '')
+      .trim()
+      .toUpperCase()}`
   }
 
   private normalizeIdent(value?: string | null): string {
     return String(value ?? '').trim().toUpperCase()
+  }
+
+  private logSourceFailure(source: string, error: unknown) {
+    console.error(`[FAILSAFE] fonte indisponível: ${source}`, error)
+  }
+
+  private async withFallback<T>(
+    source: string,
+    fallback: T,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await operation()
+    } catch (error) {
+      this.logSourceFailure(source, error)
+      return fallback
+    }
   }
 
   private parseNotamDate(raw?: string | null): Date | null {
@@ -107,13 +129,22 @@ export class NotamsService {
       return null
     }
 
-    if (/^\d{10}$/.test(value)) {
-      const year = 2000 + Number(value.slice(0, 2))
-      const month = Number(value.slice(2, 4)) - 1
-      const day = Number(value.slice(4, 6))
-      const hour = Number(value.slice(6, 8))
-      const minute = Number(value.slice(8, 10))
-      return new Date(Date.UTC(year, month, day, hour, minute))
+    const compact = value.replace(/\s+/g, '')
+    const digits = compact.replace(/EST$/, '')
+
+    if (/^\d{10}$/.test(digits)) {
+      const year = 2000 + Number(digits.slice(0, 2))
+      const month = Number(digits.slice(2, 4)) - 1
+      const day = Number(digits.slice(4, 6))
+      const hour = Number(digits.slice(6, 8))
+      const minute = Number(digits.slice(8, 10))
+
+      const parsed = new Date(Date.UTC(year, month, day, hour, minute))
+      if (Number.isNaN(parsed.getTime())) {
+        return null
+      }
+
+      return parsed
     }
 
     const parsed = new Date(value)
@@ -124,7 +155,10 @@ export class NotamsService {
     return parsed
   }
 
-  private isNotamWithinCurrentWindow(item: AiswebItemModel, now = new Date()): boolean {
+  private isNotamWithinCurrentWindow(
+    item: AiswebItemModel,
+    now = new Date(),
+  ): boolean {
     const status = String(item.status ?? '').trim().toUpperCase()
     const validFrom = this.parseNotamDate(item.b)
     const validTo = this.parseNotamDate(item.c)
@@ -312,7 +346,10 @@ export class NotamsService {
     return false
   }
 
-  private inferAreaKindFromQCode(qcode?: string | null, textE?: string | null): AreaKind {
+  private inferAreaKindFromQCode(
+    qcode?: string | null,
+    textE?: string | null,
+  ): AreaKind {
     const subject = this.getQCodeSubject(qcode)
 
     switch (subject) {
@@ -356,7 +393,10 @@ export class NotamsService {
     }
   }
 
-  private async fetchWithTimeout(url: string, timeoutMs = 20000): Promise<Response> {
+  private async fetchWithTimeout(
+    url: string,
+    timeoutMs = 20000,
+  ): Promise<Response> {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
@@ -365,7 +405,8 @@ export class NotamsService {
         method: 'GET',
         signal: controller.signal,
         headers: {
-          Accept: 'application/xml,text/xml,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
+          Accept:
+            'application/xml,text/xml,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
           'User-Agent': 'Mozilla/5.0 NOTAM Client',
           Connection: 'close',
           'Cache-Control': 'no-cache',
@@ -408,7 +449,10 @@ export class NotamsService {
         return xml
       } catch (error) {
         lastError = error
-        console.log(`[NOTAM] Erro ao consultar ${firLabel} na tentativa ${attempt}:`, error)
+        console.log(
+          `[NOTAM] Erro ao consultar ${firLabel} na tentativa ${attempt}:`,
+          error,
+        )
 
         if (attempt < maxAttempts) {
           const waitMs = attempt * 2000
@@ -421,25 +465,31 @@ export class NotamsService {
     throw lastError
   }
 
-  async fetchRemoteNotams(icaocode?: string, minutes?: number): Promise<AiswebItemModel[]> {
-    const xml = await this.fetchRemoteNotamsXml(icaocode, minutes)
-    const items = this.normalizeItems(xml)
-
-    console.log('[NOTAM] Total bruto recebido da API:', items.length)
-    return items
+  async fetchRemoteNotams(
+    icaocode?: string,
+    minutes?: number,
+  ): Promise<AiswebItemModel[]> {
+    return this.withFallback(
+      `AISWEB ${icaocode || 'GERAL'}`,
+      [],
+      async () => {
+        const xml = await this.fetchRemoteNotamsXml(icaocode, minutes)
+        const items = this.normalizeItems(xml)
+        console.log('[NOTAM] Total bruto recebido da API:', items.length)
+        return items
+      },
+    )
   }
 
-  async fetchRemoteNotamsFromAllTargetFirs(minutes?: number): Promise<AiswebItemModel[]> {
+  async fetchRemoteNotamsFromAllTargetFirs(
+    minutes?: number,
+  ): Promise<AiswebItemModel[]> {
     const allItems: AiswebItemModel[] = []
 
     for (const fir of this.targetFirs) {
-      try {
-        const items = await this.fetchRemoteNotams(fir, minutes)
-        console.log(`[NOTAM] ${fir}: ${items.length} itens`)
-        allItems.push(...items)
-      } catch (error) {
-        console.log(`[NOTAM] Falha final ao consultar ${fir}:`, error)
-      }
+      const items = await this.fetchRemoteNotams(fir, minutes)
+      console.log(`[NOTAM] ${fir}: ${items.length} itens`)
+      allItems.push(...items)
     }
 
     return allItems
@@ -449,7 +499,10 @@ export class NotamsService {
     icaocode?: string
     minutes?: number
   }): Promise<NotamModel[]> {
-    const items = await this.fetchRemoteNotams(params?.icaocode, params?.minutes)
+    const items = await this.fetchRemoteNotams(
+      params?.icaocode,
+      params?.minutes,
+    )
 
     return items
       .filter((item) => this.isNotamWithinCurrentWindow(item))
@@ -514,7 +567,10 @@ export class NotamsService {
         return this.geoJsonCoordsToLatLon(parsed.coordinates[0])
       }
 
-      if (parsed?.type === 'MultiPolygon' && Array.isArray(parsed.coordinates?.[0]?.[0])) {
+      if (
+        parsed?.type === 'MultiPolygon' &&
+        Array.isArray(parsed.coordinates?.[0]?.[0])
+      ) {
         return this.geoJsonCoordsToLatLon(parsed.coordinates[0][0])
       }
 
@@ -560,7 +616,12 @@ export class NotamsService {
     return []
   }
 
-  private dmsToDecimal(deg: number, min: number, sec: number, hemi: string): number {
+  private dmsToDecimal(
+    deg: number,
+    min: number,
+    sec: number,
+    hemi: string,
+  ): number {
     let value = deg + min / 60 + sec / 3600
 
     if (hemi === 'S' || hemi === 'W') {
@@ -619,13 +680,13 @@ export class NotamsService {
     return this.closeRingIfNeeded(coords)
   }
 
-  private parseGeoCircle(raw?: string | null): { center: LatLon; radius_m: number } | null {
+  private parseGeoCircle(
+    raw?: string | null,
+  ): { center: LatLon; radius_m: number } | null {
     const value = String(raw ?? '').trim().toUpperCase()
     if (!value) return null
 
-    const match = value.match(
-      /^(\d{2})(\d{2})([NS])(\d{3})(\d{2})([EW])(\d{3})$/,
-    )
+    const match = value.match(/^(\d{2})(\d{2})([NS])(\d{3})(\d{2})([EW])(\d{3})$/)
 
     if (!match) return null
 
@@ -641,7 +702,11 @@ export class NotamsService {
     const lon = (lonDeg + lonMin / 60) * (lonHem === 'W' ? -1 : 1)
     const radius_m = radiusNm * this.NM_TO_M
 
-    if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radius_m)) {
+    if (
+      !Number.isFinite(lat) ||
+      !Number.isFinite(lon) ||
+      !Number.isFinite(radius_m)
+    ) {
       return null
     }
 
@@ -695,9 +760,7 @@ export class NotamsService {
     const sinAd = Math.sin(angularDistance)
     const cosAd = Math.cos(angularDistance)
 
-    const lat2 = Math.asin(
-      sinLat1 * cosAd + cosLat1 * sinAd * Math.cos(bearing),
-    )
+    const lat2 = Math.asin(sinLat1 * cosAd + cosLat1 * sinAd * Math.cos(bearing))
 
     const lon2 =
       lon1 +
@@ -743,7 +806,11 @@ export class NotamsService {
         : startBearing - sweep * fraction
 
       result.push(
-        this.destinationPoint(center, this.normalizeBearing(bearing), radiusMeters),
+        this.destinationPoint(
+          center,
+          this.normalizeBearing(bearing),
+          radiusMeters,
+        ),
       )
     }
 
@@ -846,12 +913,14 @@ export class NotamsService {
       }
     }
 
-    const geo = String(item.geo ?? '').trim()
     const textE = String(item.e ?? '').trim()
+    const geo = String(item.geo ?? '').trim()
 
     if (textE) {
       if (this.textUsesBorderClosure(textE)) {
-        console.log('[NOTAM] geometria depende de fechamento por fronteira terrestre')
+        console.log(
+          '[NOTAM] geometria depende de fechamento por fronteira terrestre',
+        )
         return {
           parser: 'border-closure-unsupported',
           coords: [],
@@ -861,7 +930,6 @@ export class NotamsService {
       }
 
       const textArcCoords = this.parseTextEWithArcs(textE)
-
       if (textArcCoords.length >= 4) {
         return {
           parser: 'textE-dms',
@@ -872,7 +940,7 @@ export class NotamsService {
       }
 
       const textCoords = this.parseDmsSequence(textE)
-      if (textCoords.length >= 3) {
+      if (textCoords.length >= 4) {
         return {
           parser: 'textE-dms',
           coords: textCoords,
@@ -884,7 +952,7 @@ export class NotamsService {
 
     if (geo) {
       const geoJsonCoords = this.parseGeoJsonLike(geo)
-      if (geoJsonCoords.length >= 3) {
+      if (geoJsonCoords.length >= 4) {
         return {
           parser: 'geojson',
           coords: geoJsonCoords,
@@ -894,7 +962,7 @@ export class NotamsService {
       }
 
       const wktCoords = this.parseWktPolygon(geo)
-      if (wktCoords.length >= 3) {
+      if (wktCoords.length >= 4) {
         return {
           parser: 'wkt',
           coords: wktCoords,
@@ -904,7 +972,7 @@ export class NotamsService {
       }
 
       const dmsCoords = this.parseDmsSequence(geo)
-      if (dmsCoords.length >= 3) {
+      if (dmsCoords.length >= 4) {
         return {
           parser: 'geo-dms',
           coords: dmsCoords,
@@ -943,13 +1011,19 @@ export class NotamsService {
     return `${fir}::${numero}::${id}`
   }
 
-  async findAreasFromApiByTargetFirs(
-    minutes?: number,
-    options?: { incluirLidos?: boolean },
+  async getAreasNotamAgrupadas(
+    incluirLidos = true,
   ): Promise<Record<string, AreaNotamApiModel[]>> {
-    const items = await this.fetchRemoteNotamsFromAllTargetFirs(minutes)
-    const readMap = await this.notamReadStateService.getReadMap()
-    const incluirLidos = options?.incluirLidos ?? false
+    const items = await this.fetchRemoteNotamsFromAllTargetFirs()
+    const readStates = await this.notamReadStateService.getReadStates()
+
+    const readMap = new Set(
+      readStates
+        .filter((item) => item.lido)
+        .map((item) =>
+          this.normalizeReadKey(item.source_id, item.numero_notam),
+        ),
+    )
 
     const grouped: Record<string, AreaNotamApiModel[]> = {
       SBCW: [],
@@ -979,23 +1053,19 @@ export class NotamsService {
 
       if (geometry.parser === 'ignored-qcode') continue
       if (geometry.parser === 'border-closure-unsupported') continue
-
-      if (
-        geometry.parser !== 'circle' &&
-        this.isPolygonParser(geometry.parser) &&
-        geometry.coords.length < 4
-      ) {
-        continue
-      }
-
       if (geometry.parser === 'none') continue
 
-      if (
+      const isPolygon =
+        geometry.parser !== 'circle' &&
+        this.isPolygonParser(geometry.parser) &&
+        geometry.coords.length >= 4
+
+      const isCircle =
         geometry.parser === 'circle' &&
-        (!geometry.center || !geometry.radius_m)
-      ) {
-        continue
-      }
+        !!geometry.center &&
+        !!geometry.radius_m
+
+      if (!isPolygon && !isCircle) continue
 
       for (const fir of resolvedFirs) {
         const key = this.dedupeAreaKey(fir, item)
@@ -1011,14 +1081,14 @@ export class NotamsService {
           valid_from: item.b ?? '',
           valid_to: item.c ?? '',
           q_line: item.cod ?? '',
-          coords_latlon: geometry.coords,
+          coords_latlon: isPolygon ? geometry.coords : [],
           texto_notam: item.e ?? '',
           f: item.f ?? '',
           g: item.g ?? '',
           source_id: item.id,
-          geometry_type: geometry.parser === 'circle' ? 'CIRCLE' : 'POLYGON',
-          center: geometry.center,
-          radius_m: geometry.radius_m,
+          geometry_type: isPolygon ? 'POLYGON' : 'CIRCLE',
+          center: isCircle ? geometry.center : null,
+          radius_m: isCircle ? geometry.radius_m : null,
           lido,
         } as AreaNotamApiModel)
       }
@@ -1027,12 +1097,113 @@ export class NotamsService {
     return grouped
   }
 
+  async findAreasFromApiByTargetFirs(
+    minutes?: number,
+    options?: { incluirLidos?: boolean },
+  ): Promise<Record<string, AreaNotamApiModel[]>> {
+    const incluirLidos = options?.incluirLidos ?? false
+
+    if (typeof minutes === 'number' && Number.isFinite(minutes)) {
+      const items = await this.fetchRemoteNotamsFromAllTargetFirs(minutes)
+      const readStates = await this.notamReadStateService.getReadStates()
+
+      const readMap = new Set(
+        readStates
+          .filter((item) => item.lido)
+          .map((item) =>
+            this.normalizeReadKey(item.source_id, item.numero_notam),
+          ),
+      )
+
+      const grouped: Record<string, AreaNotamApiModel[]> = {
+        SBCW: [],
+        SBBS: [],
+        SBRE: [],
+        SBAZ: [],
+        SBAO: [],
+      }
+
+      const dedupe = new Set<string>()
+
+      for (const item of items) {
+        const numero = String(item.n ?? item.number ?? '').trim().toUpperCase()
+        const qcode = this.normalizeQCode(item.cod)
+        const resolvedFirs = this.resolveItemTargetFirs(item)
+        const areaKind = this.inferAreaKindFromQCode(qcode, item.e)
+        const sourceId = String(item.id ?? '').trim()
+        const lido = readMap.has(this.normalizeReadKey(sourceId, numero))
+
+        if (!resolvedFirs.length) continue
+        if (!this.isNotamWithinCurrentWindow(item)) continue
+        if (this.isIgnoredQCode(qcode)) continue
+        if (!this.isAreaQCode(qcode, item.e)) continue
+        if (!incluirLidos && lido) continue
+
+        const geometry = this.extractGeometryFromItem(item)
+
+        if (geometry.parser === 'ignored-qcode') continue
+        if (geometry.parser === 'border-closure-unsupported') continue
+        if (geometry.parser === 'none') continue
+
+        const isPolygon =
+          geometry.parser !== 'circle' &&
+          this.isPolygonParser(geometry.parser) &&
+          geometry.coords.length >= 4
+
+        const isCircle =
+          geometry.parser === 'circle' &&
+          !!geometry.center &&
+          !!geometry.radius_m
+
+        if (!isPolygon && !isCircle) continue
+
+        for (const fir of resolvedFirs) {
+          const key = this.dedupeAreaKey(fir, item)
+          if (dedupe.has(key)) continue
+
+          dedupe.add(key)
+
+          grouped[fir].push({
+            nome: `${numero} | ${areaKind}`,
+            numero_notam: numero,
+            fir_match: fir,
+            area_type: this.inferAreaType(item),
+            valid_from: item.b ?? '',
+            valid_to: item.c ?? '',
+            q_line: item.cod ?? '',
+            coords_latlon: isPolygon ? geometry.coords : [],
+            texto_notam: item.e ?? '',
+            f: item.f ?? '',
+            g: item.g ?? '',
+            source_id: item.id,
+            geometry_type: isPolygon ? 'POLYGON' : 'CIRCLE',
+            center: isCircle ? geometry.center : null,
+            radius_m: isCircle ? geometry.radius_m : null,
+            lido,
+          } as AreaNotamApiModel)
+        }
+      }
+
+      return grouped
+    }
+
+    return this.getAreasNotamAgrupadas(incluirLidos)
+  }
+
   async importAeroviasAlta(): Promise<AeroviaLinhaModel[]> {
-    return this.loadAerovias(this.envService.aeroviasAltaUrl)
+    return this.withFallback(
+      'AEROVIAS_ALTA_URL',
+      [],
+      async () => this.loadAerovias(this.envService.aeroviasAltaUrl),
+    )
   }
 
   async importAeroviasBaixa(): Promise<AeroviaLinhaModel[]> {
-    return this.loadAerovias(this.envService.aeroviasBaixaUrl)
+    return this.withFallback(
+      'AEROVIAS_BAIXA_URL',
+      [],
+      async () => this.loadAerovias(this.envService.aeroviasBaixaUrl),
+    )
   }
 
   async importAeroviasTodas(): Promise<AeroviasResponseModel> {
@@ -1045,126 +1216,146 @@ export class NotamsService {
   }
 
   async importAeroportos(): Promise<AeroportoModel[]> {
-    const csv = await this.fetchText(this.envService.airportsUrl)
-    const lines = csv.split(/\r?\n/).filter((line) => line.trim())
+    return this.withFallback('AIRPORTS_URL', [], async () => {
+      const csv = await this.fetchText(this.envService.airportsUrl)
+      if (!csv.trim()) return []
 
-    if (lines.length < 2) return []
+      const lines = csv.split(/\r?\n/).filter((line) => line.trim())
 
-    const headers = this.splitCsvLine(lines[0])
-    const idxGpsCode = headers.indexOf('gps_code')
-    const idxIdent = headers.indexOf('ident')
-    const idxLocalCode = headers.indexOf('local_code')
-    const idxLatitude = headers.indexOf('latitude_deg')
-    const idxLongitude = headers.indexOf('longitude_deg')
-    const idxIsoCountry = headers.indexOf('iso_country')
-    const idxType = headers.indexOf('type')
+      if (lines.length < 2) return []
 
-    const byIcao = new Map<string, AeroportoModel>()
+      const headers = this.splitCsvLine(lines[0])
+      const idxGpsCode = headers.indexOf('gps_code')
+      const idxIdent = headers.indexOf('ident')
+      const idxLocalCode = headers.indexOf('local_code')
+      const idxLatitude = headers.indexOf('latitude_deg')
+      const idxLongitude = headers.indexOf('longitude_deg')
+      const idxIsoCountry = headers.indexOf('iso_country')
+      const idxType = headers.indexOf('type')
 
-    for (let i = 1; i < lines.length; i++) {
-      const cols = this.splitCsvLine(lines[i])
+      const byIcao = new Map<string, AeroportoModel>()
 
-      const gpsCode = (cols[idxGpsCode] ?? '').trim().toUpperCase()
-      const ident = (cols[idxIdent] ?? '').trim().toUpperCase()
-      const localCode = (cols[idxLocalCode] ?? '').trim().toUpperCase()
-      const icao = gpsCode || ident || localCode
+      for (let i = 1; i < lines.length; i++) {
+        const cols = this.splitCsvLine(lines[i])
 
-      const isoCountry = (cols[idxIsoCountry] ?? '').trim().toUpperCase()
-      const type = (cols[idxType] ?? '').trim().toLowerCase()
-      const latitude = Number(cols[idxLatitude] ?? '')
-      const longitude = Number(cols[idxLongitude] ?? '')
+        const gpsCode = (cols[idxGpsCode] ?? '').trim().toUpperCase()
+        const ident = (cols[idxIdent] ?? '').trim().toUpperCase()
+        const localCode = (cols[idxLocalCode] ?? '').trim().toUpperCase()
+        const icao = gpsCode || ident || localCode
 
-      if (!icao || !icao.startsWith('SB')) continue
-      if (isoCountry !== 'BR') continue
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
-      if (type === 'closed') continue
+        const isoCountry = (cols[idxIsoCountry] ?? '').trim().toUpperCase()
+        const type = (cols[idxType] ?? '').trim().toLowerCase()
+        const latitude = Number(cols[idxLatitude] ?? '')
+        const longitude = Number(cols[idxLongitude] ?? '')
 
-      if (!byIcao.has(icao)) {
-        byIcao.set(icao, {
-          icao,
-          latitude,
-          longitude,
-        })
-      }
-    }
-
-    return Array.from(byIcao.values()).sort((a, b) => a.icao.localeCompare(b.icao))
-  }
-
-  async importWaypoints(): Promise<WaypointModel[]> {
-    const source = this.envService.waypointsUrl
-
-    if (!source || !/^https?:\/\//i.test(source)) {
-      throw new Error('WAYPOINTS_URL inválido ou não configurado')
-    }
-
-    const xlsx = await import('xlsx')
-    const buffer = await this.fetchBuffer(source)
-    const workbook = xlsx.read(buffer, { type: 'buffer' })
-
-    const result = new Map<string, WaypointModel>()
-
-    for (const sheetName of workbook.SheetNames) {
-      const sheet = workbook.Sheets[sheetName]
-      if (!sheet) continue
-
-      const rows = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, {
-        defval: '',
-        raw: false,
-      })
-
-      for (const row of rows) {
-        const ident = this.extractWaypointIdent(row)
-        const latitude = this.extractWaypointLatitude(row)
-        const longitude = this.extractWaypointLongitude(row)
-
-        if (!ident) continue
+        if (!icao || !icao.startsWith('SB')) continue
+        if (isoCountry !== 'BR') continue
         if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
+        if (type === 'closed') continue
 
-        if (!result.has(ident)) {
-          result.set(ident, {
-            ident,
+        if (!byIcao.has(icao)) {
+          byIcao.set(icao, {
+            icao,
             latitude,
             longitude,
           })
         }
       }
-    }
 
-    return Array.from(result.values()).sort((a, b) =>
-      a.ident.localeCompare(b.ident),
-    )
+      return Array.from(byIcao.values()).sort((a, b) =>
+        a.icao.localeCompare(b.icao),
+      )
+    })
+  }
+
+  async importWaypoints(): Promise<WaypointModel[]> {
+    return this.withFallback('WAYPOINTS_URL', [], async () => {
+      const source = this.envService.waypointsUrl
+
+      if (!source || !/^https?:\/\//i.test(source)) {
+        return []
+      }
+
+      const buffer = await this.fetchBuffer(source)
+      if (!buffer.length) return []
+
+      const xlsx = await import('xlsx')
+      const workbook = xlsx.read(buffer, { type: 'buffer' })
+
+      const result = new Map<string, WaypointModel>()
+
+      for (const sheetName of workbook.SheetNames) {
+        const sheet = workbook.Sheets[sheetName]
+        if (!sheet) continue
+
+        const rows = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+          defval: '',
+          raw: false,
+        })
+
+        for (const row of rows) {
+          const ident = this.extractWaypointIdent(row)
+          const latitude = this.extractWaypointLatitude(row)
+          const longitude = this.extractWaypointLongitude(row)
+
+          if (!ident) continue
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
+
+          if (!result.has(ident)) {
+            result.set(ident, {
+              ident,
+              latitude,
+              longitude,
+            })
+          }
+        }
+      }
+
+      return Array.from(result.values()).sort((a, b) =>
+        a.ident.localeCompare(b.ident),
+      )
+    })
   }
 
   async importRpl(): Promise<RotaRplModel[]> {
-    const [text, aeroportos, waypoints] = await Promise.all([
-      this.fetchText(this.envService.rplUrl),
-      this.importAeroportos(),
-      this.importWaypoints(),
-    ])
+    return this.withFallback('RPL_URL', [], async () => {
+      const [text, aeroportos, waypoints] = await Promise.all([
+        this.fetchText(this.envService.rplUrl),
+        this.importAeroportos(),
+        this.importWaypoints(),
+      ])
 
-    const airportMap = new Map(
-      aeroportos.map((a) => [this.normalizeIdent(a.icao), a]),
-    )
-
-    const waypointMap = new Map(
-      waypoints.map((w) => [this.normalizeIdent(w.ident), w]),
-    )
-
-    const registros = this.parseRplRecords(text)
-    const result: RotaRplModel[] = []
-
-    for (const registro of registros) {
-      const rota = this.parseRplRecord(registro, airportMap, waypointMap)
-      if (rota && rota.coords_latlon.length >= 2) {
-        result.push(rota)
+      if (!text.trim()) {
+        return []
       }
-    }
 
-    return result
+      const airportMap = new Map(
+        aeroportos.map((a) => [this.normalizeIdent(a.icao), a]),
+      )
+
+      const waypointMap = new Map(
+        waypoints.map((w) => [this.normalizeIdent(w.ident), w]),
+      )
+
+      const registros = this.parseRplRecords(text)
+      const result: RotaRplModel[] = []
+
+      for (const registro of registros) {
+        const rota = this.parseRplRecord(registro, airportMap, waypointMap)
+        if (rota && rota.coords_latlon.length >= 2) {
+          result.push(rota)
+        }
+      }
+
+      return result
+    })
   }
 
   private async fetchJson<T>(url: string): Promise<T> {
+    if (!url || !/^https?:\/\//i.test(url)) {
+      throw new Error(`URL inválida: ${url}`)
+    }
+
     const response = await this.fetchWithTimeout(url, 20000)
 
     if (!response.ok) {
@@ -1232,12 +1423,18 @@ export class NotamsService {
     ]
 
     for (const candidate of candidates) {
-      if (candidate !== undefined && candidate !== null && String(candidate).trim()) {
+      if (
+        candidate !== undefined &&
+        candidate !== null &&
+        String(candidate).trim()
+      ) {
         return String(candidate).trim()
       }
     }
 
-    return properties?.text_designator ? String(properties.text_designator).trim() : 'NOME DESCONHECIDO'
+    return properties?.text_designator
+      ? String(properties.text_designator).trim()
+      : 'NOME DESCONHECIDO'
   }
 
   private geometryToLines(geometry?: GeoJsonGeometryModel | null): LatLon[][] {
@@ -1356,7 +1553,8 @@ export class NotamsService {
     if (upper.includes('PAG.:')) return true
     if (upper.includes('VALIDO VALIDO DIAS OP')) return true
     if (upper.includes('DEST') && upper.includes('OBSERVACOES')) return true
-    if (upper.includes('DESDE') && upper.includes('ATE') && upper.includes('EOBT')) return true
+    if (upper.includes('DESDE') && upper.includes('ATE') && upper.includes('EOBT'))
+      return true
     if (/^[-=]{3,}$/.test(upper)) return true
 
     return false
@@ -1442,13 +1640,19 @@ export class NotamsService {
     for (const point of points) {
       const airport = airportMap.get(point)
       if (airport) {
-        this.pushUniqueRouteCoord(coords, seen, [airport.latitude, airport.longitude])
+        this.pushUniqueRouteCoord(coords, seen, [
+          airport.latitude,
+          airport.longitude,
+        ])
         continue
       }
 
       const waypoint = waypointMap.get(point)
       if (waypoint) {
-        this.pushUniqueRouteCoord(coords, seen, [waypoint.latitude, waypoint.longitude])
+        this.pushUniqueRouteCoord(coords, seen, [
+          waypoint.latitude,
+          waypoint.longitude,
+        ])
       }
     }
 
@@ -1484,7 +1688,11 @@ export class NotamsService {
     points.push(normalized)
   }
 
-  private pushUniqueRouteCoord(coords: LatLon[], seen: Set<string>, coord: LatLon) {
+  private pushUniqueRouteCoord(
+    coords: LatLon[],
+    seen: Set<string>,
+    coord: LatLon,
+  ) {
     if (!this.isFiniteCoord(coord)) return
 
     const key = `${coord[0].toFixed(6)},${coord[1].toFixed(6)}`
@@ -1589,7 +1797,14 @@ export class NotamsService {
 
   private isValidRouteToken(token: string): boolean {
     if (!token) return false
-    if (token === 'DCT' || token === 'IFR' || token === 'VFR' || token === 'C' || token === 'NIL') return false
+    if (
+      token === 'DCT' ||
+      token === 'IFR' ||
+      token === 'VFR' ||
+      token === 'C' ||
+      token === 'NIL'
+    )
+      return false
     if (/^N\d{4}$/i.test(token)) return false
     if (/^K\d{4}$/i.test(token)) return false
     if (/^M\d{3}$/i.test(token)) return false

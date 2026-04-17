@@ -100,7 +100,7 @@ export class NotamsController {
 
   @Get('read-states')
   getReadStates(@Query('fir') fir?: string) {
-    return this.notamReadStateService.getReadStates(fir)
+    return this.notamReadStateService.buildReadStateMap()
   }
 
   @Post('read-state')

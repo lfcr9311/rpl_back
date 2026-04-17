@@ -11,7 +11,7 @@ export class NotamReadStateController {
 
   @Get()
   async list(@Query() query: GetNotamReadStatesDto) {
-    return this.notamReadStateService.getReadStates(query.fir)
+    return this.notamReadStateService.getReadStates()
   }
 
   @Patch()
