@@ -8,10 +8,10 @@ import { ConfigModule } from '@nestjs/config'
 import { NotamReadStateService } from '../service/notam-read-state.service'
 import { NotamReadStateController } from '../controller/notam-read-state.controller'
 import { DatabaseService } from '../config/database'
-import { ManualRouteService } from 'src/service/manual-route.service'
-import { ManualRouteController } from 'src/controller/manual-route.controller'
-import { FirController } from 'src/controller/fir.controller'
-import { FirService } from 'src/service/fir.service'
+import { ManualRouteService } from '../service/manual-route.service'
+import { ManualRouteController } from '../controller/manual-route.controller'
+import { FirController } from '../controller/fir.controller'
+import { FirService } from '../service/fir.service'
 
 @Module({
   imports: [ConfigModule],
