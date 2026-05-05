@@ -155,6 +155,11 @@ export class NotamsService {
     return parsed
   }
 
+  private isPermanentNotam(item: AiswebItemModel): boolean {
+    const validTo = String(item.c ?? '').trim().toUpperCase()
+    return validTo === 'PERM'
+  }
+
   private isNotamWithinCurrentWindow(
     item: AiswebItemModel,
     now = new Date(),
@@ -307,9 +312,12 @@ export class NotamsService {
       value.includes('AREA DE OPERACAO MILITAR') ||
       value.includes('MILITARY OPERATING AREA') ||
       value.includes('AIRSPACE RESERVATION') ||
+      value.includes('AREA DEFINED BY') ||
+      value.includes('AREA DELIMITADA') ||
+      value.includes('AREA COMPREENDIDA') ||
+      value.includes('AREA CIRCULAR') ||
+      value.includes('RAIO') ||
       value.includes('WI COORD') ||
-      value.includes('CENTRO COORD') ||
-      value.includes('COORD ') ||
       /\bSBR\s?\d{3}\b/.test(value) ||
       /\bSBP\s?\d{3}\b/.test(value) ||
       /\bSBD\s?\d{3}\b/.test(value)
@@ -344,6 +352,16 @@ export class NotamsService {
     }
 
     return false
+  }
+
+  private shouldPlotNotamArea(item: AiswebItemModel): boolean {
+    const qcode = this.normalizeQCode(item.cod)
+
+    if (this.isPermanentNotam(item)) return false
+    if (this.isIgnoredQCode(qcode)) return false
+    if (!this.isAreaQCode(qcode, item.e)) return false
+
+    return true
   }
 
   private inferAreaKindFromQCode(
@@ -1045,8 +1063,7 @@ export class NotamsService {
 
       if (!resolvedFirs.length) continue
       if (!this.isNotamWithinCurrentWindow(item)) continue
-      if (this.isIgnoredQCode(qcode)) continue
-      if (!this.isAreaQCode(qcode, item.e)) continue
+      if (!this.shouldPlotNotamArea(item)) continue
       if (!incluirLidos && lido) continue
 
       const geometry = this.extractGeometryFromItem(item)
@@ -1135,8 +1152,7 @@ export class NotamsService {
 
         if (!resolvedFirs.length) continue
         if (!this.isNotamWithinCurrentWindow(item)) continue
-        if (this.isIgnoredQCode(qcode)) continue
-        if (!this.isAreaQCode(qcode, item.e)) continue
+        if (!this.shouldPlotNotamArea(item)) continue
         if (!incluirLidos && lido) continue
 
         const geometry = this.extractGeometryFromItem(item)
@@ -1553,8 +1569,9 @@ export class NotamsService {
     if (upper.includes('PAG.:')) return true
     if (upper.includes('VALIDO VALIDO DIAS OP')) return true
     if (upper.includes('DEST') && upper.includes('OBSERVACOES')) return true
-    if (upper.includes('DESDE') && upper.includes('ATE') && upper.includes('EOBT'))
+    if (upper.includes('DESDE') && upper.includes('ATE') && upper.includes('EOBT')) {
       return true
+    }
     if (/^[-=]{3,}$/.test(upper)) return true
 
     return false
@@ -1803,8 +1820,9 @@ export class NotamsService {
       token === 'VFR' ||
       token === 'C' ||
       token === 'NIL'
-    )
+    ) {
       return false
+    }
     if (/^N\d{4}$/i.test(token)) return false
     if (/^K\d{4}$/i.test(token)) return false
     if (/^M\d{3}$/i.test(token)) return false

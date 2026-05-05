@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common'
 import { WaypointsService } from '../service/waypoints'
 
-@Controller('waypoints')
+@Controller('notams/waypoints')
 export class WaypointsController {
   constructor(private readonly service: WaypointsService) {}
 
@@ -11,7 +11,7 @@ export class WaypointsController {
   }
 
   @Get('geojson')
-  findGeo() {
+  findGeoJson() {
     return this.service.findAsGeoJson()
   }
 }
