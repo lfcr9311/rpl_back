@@ -30,7 +30,6 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       await client.query('SELECT 1')
       this.logger.log('Query básica OK')
 
-      // 🔥 CHECK DE MIGRAÇÃO (ajusta o nome da tabela)
       const result = await client.query(`
         SELECT table_name
         FROM information_schema.tables
@@ -40,12 +39,6 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       const tables = result.rows.map((r) => r.table_name)
 
       this.logger.log(`Tabelas encontradas: ${tables.join(', ') || 'nenhuma'}`)
-
-      const expectedTable = 'notam' // ajuste aqui
-      if (tables.includes(expectedTable)) {
-        this.logger.log(`Migração OK: tabela "${expectedTable}" existe`)
-      }
-
       client.release()
     } catch (err) {
       this.logger.error('Erro ao conectar ou validar migração', err)
