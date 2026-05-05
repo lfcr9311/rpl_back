@@ -12,17 +12,20 @@ import { ManualRouteService } from '../service/manual-route.service'
 import { ManualRouteController } from '../controller/manual-route.controller'
 import { FirController } from '../controller/fir.controller'
 import { FirService } from '../service/fir.service'
+import { NavaidsService } from '../service/navaids.service'
+import { NavaidsController } from '../controller/navaids.controller'
 
 @Module({
   imports: [ConfigModule],
-  controllers: [NotamsController, NotamReadStateController, ManualRouteController, FirController],
+  controllers: [NotamsController, NotamReadStateController, ManualRouteController, FirController, NavaidsController],
   providers: [
     NotamsService, 
     EnvService, NotamGeometryService, 
     NotamHttpService, NotamReadStateService, 
     DatabaseService, 
     ManualRouteService,
-    FirService
+    FirService,
+    NavaidsService
   ],
   exports: [NotamsService],
 })
