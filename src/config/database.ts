@@ -41,12 +41,9 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
 
       this.logger.log(`Tabelas encontradas: ${tables.join(', ') || 'nenhuma'}`)
 
-      // exemplo: verifica tabela específica criada pela migração
       const expectedTable = 'notam' // ajuste aqui
       if (tables.includes(expectedTable)) {
         this.logger.log(`Migração OK: tabela "${expectedTable}" existe`)
-      } else {
-        this.logger.error(`Migração NÃO aplicada: tabela "${expectedTable}" NÃO existe`)
       }
 
       client.release()
