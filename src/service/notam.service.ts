@@ -1039,7 +1039,7 @@ export class NotamsService {
       readStates
         .filter((item) => item.lido)
         .map((item) =>
-          this.normalizeReadKey(item.source_id, item.numero_notam),
+          this.normalizeReadKey(item.sourceId, item.numeroNotam),
         ),
     )
 
@@ -1128,7 +1128,7 @@ export class NotamsService {
         readStates
           .filter((item) => item.lido)
           .map((item) =>
-            this.normalizeReadKey(item.source_id, item.numero_notam),
+            this.normalizeReadKey(item.sourceId, item.numeroNotam),
           ),
       )
 

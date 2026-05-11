@@ -11,12 +11,12 @@ type SetReadStateInput = {
 
 type NotamReadStateRow = {
   id: string
-  source_id: string
-  numero_notam: string
+  sourceId: string
+  numeroNotam: string
   fir: string | null
   lido: boolean
-  created_at: Date
-  updated_at: Date
+  createdAt: Date
+  updatedAt: Date
 }
 
 @Injectable()
@@ -45,6 +45,7 @@ export class NotamReadStateService {
     fir?: string | null
   }): string {
     const explicitSourceId = this.normalizeOptionalString(input.sourceId)
+
     if (explicitSourceId) {
       return explicitSourceId
     }
@@ -61,10 +62,11 @@ export class NotamReadStateService {
     }
 
     const err = error as { code?: string }
+
     return err.code === '42P01'
   }
 
-  private async ensureTableExists(): Promise<boolean> {
+  private async ensureTableExists(): Promise<void> {
     try {
       const result = await this.db.query<{ exists: boolean }>(
         `
@@ -78,20 +80,17 @@ export class NotamReadStateService {
         [this.tableName],
       )
 
-      return !!result.rows[0]?.exists
+      if (!result.rows[0]?.exists) {
+        throw new Error(`Tabela ${this.tableName} não existe no banco conectado pelo backend`)
+      }
     } catch (error) {
       this.logger.error('Erro ao verificar existência da tabela notam_read_state', error as Error)
-      return false
+      throw error
     }
   }
 
-  async setReadState(input: SetReadStateInput): Promise<void> {
-    const tableExists = await this.ensureTableExists()
-
-    if (!tableExists) {
-      this.logger.warn(`Tabela ${this.tableName} não existe. Estado de leitura não será persistido.`)
-      return
-    }
+  async setReadState(input: SetReadStateInput): Promise<{ ok: boolean }> {
+    await this.ensureTableExists()
 
     const numeroNotam = this.normalizeNumeroNotam(input.numeroNotam)
     const fir = this.normalizeOptionalString(input.fir)?.toUpperCase() ?? null
@@ -100,6 +99,10 @@ export class NotamReadStateService {
       numeroNotam,
       fir,
     })
+
+    if (!numeroNotam) {
+      throw new Error('numeroNotam não informado')
+    }
 
     const id = randomUUID()
 
@@ -122,10 +125,11 @@ export class NotamReadStateService {
         `,
         [id, sourceId, numeroNotam, fir, input.lido],
       )
+
+      return { ok: true }
     } catch (error) {
       if (this.isRelationMissingError(error)) {
-        this.logger.warn(`Tabela ${this.tableName} não existe. Ignorando persistência de leitura.`)
-        return
+        throw new Error(`Tabela ${this.tableName} não existe`)
       }
 
       this.logger.error('Erro ao salvar estado de leitura do NOTAM', error as Error)
@@ -134,33 +138,28 @@ export class NotamReadStateService {
   }
 
   async getReadStates(): Promise<NotamReadStateRow[]> {
-    const tableExists = await this.ensureTableExists()
-
-    if (!tableExists) {
-      this.logger.warn(`Tabela ${this.tableName} não existe. Retornando lista vazia.`)
-      return []
-    }
+    await this.ensureTableExists()
 
     try {
       const result = await this.db.query<NotamReadStateRow>(
         `
           SELECT
             id,
-            source_id,
-            numero_notam,
+            source_id AS "sourceId",
+            numero_notam AS "numeroNotam",
             fir,
             lido,
-            created_at,
-            updated_at
+            created_at AS "createdAt",
+            updated_at AS "updatedAt"
           FROM notam_read_state
+          ORDER BY updated_at DESC
         `,
       )
 
       return result.rows
     } catch (error) {
       if (this.isRelationMissingError(error)) {
-        this.logger.warn(`Tabela ${this.tableName} não existe. Retornando lista vazia.`)
-        return []
+        throw new Error(`Tabela ${this.tableName} não existe`)
       }
 
       this.logger.error('Erro ao listar estados de leitura', error as Error)
@@ -173,8 +172,8 @@ export class NotamReadStateService {
     const map = new Map<string, boolean>()
 
     for (const row of rows) {
-      const sourceId = this.normalizeString(row.source_id)
-      const numeroNotam = this.normalizeNumeroNotam(row.numero_notam)
+      const sourceId = this.normalizeString(row.sourceId)
+      const numeroNotam = this.normalizeNumeroNotam(row.numeroNotam)
       const fir = this.normalizeOptionalString(row.fir)?.toUpperCase() ?? ''
 
       if (sourceId) {
