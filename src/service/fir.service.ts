@@ -6,13 +6,14 @@ export class FirService {
   private readonly logger = new Logger(FirService.name)
 
   private readonly firUrl =
-    'https://teste2005192.kloudbean-s3.com/1776344946_SETOR_FIR.csv'
+    process.env.FIR_WFS_URL ||
+    'https://geoaisweb.decea.mil.br/geoserver/ICA/ows?service=WFS&version=1.0.0&request=GetFeature&typeName=ICA%3Afir'
 
   async findAll(): Promise<FirModel[]> {
-    const csv = await this.fetchText(this.firUrl)
-    const firs = this.parseFirCsv(csv)
+    const xml = await this.fetchText(this.firUrl)
+    const firs = this.parseFirXml(xml)
 
-    this.logger.log(`FIRs carregadas: ${firs.length}`)
+    this.logger.log(`FIRs carregadas via WFS XML: ${firs.length}`)
 
     return firs
   }
@@ -23,84 +24,43 @@ export class FirService {
 
       if (!response.ok) {
         throw new InternalServerErrorException(
-          `Falha ao baixar CSV de FIR. HTTP ${response.status}`,
+          `Falha ao baixar XML de FIR. HTTP ${response.status}`,
         )
       }
 
       return await response.text()
     } catch (error) {
-      this.logger.error('Erro ao baixar CSV de FIR', error as Error)
-      throw new InternalServerErrorException('Erro ao baixar CSV de FIR')
+      this.logger.error('Erro ao baixar XML de FIR', error as Error)
+      throw new InternalServerErrorException('Erro ao baixar XML de FIR')
     }
   }
 
-  private parseFirCsv(csv: string): FirModel[] {
-    const lines = String(csv ?? '')
-      .split(/\r?\n/)
-      .filter((line) => line.trim().length > 0)
-
-    if (lines.length <= 1) {
-      return []
-    }
-
-    const header = this.splitCsvRow(lines[0])
-
-    const idIndex = this.findColumnIndex(header, ['fid', 'id'])
-    const identIndex = this.findColumnIndex(header, ['ident'])
-    const nameIndex = this.findColumnIndex(header, ['nam', 'name', 'nome'])
-    const icaoIndex = this.findColumnIndex(header, ['icaocode', 'icao'])
-    const relatedFirIndex = this.findColumnIndex(header, ['relatedfir'])
-    const typeIndex = this.findColumnIndex(header, ['typ', 'type', 'tipo'])
-    const geomIndex = this.findColumnIndex(header, ['geom', 'geometry', 'wkt'])
-
+  private parseFirXml(xml: string): FirModel[] {
+    const content = String(xml ?? '')
+    const firBlocks = this.extractBlocks(content, 'ICA:fir')
     const result: FirModel[] = []
 
-    for (let i = 1; i < lines.length; i++) {
-      const cols = this.splitCsvRow(lines[i])
+    for (let i = 0; i < firBlocks.length; i++) {
+      const block = firBlocks[i]
 
-      const geom = geomIndex >= 0 ? cols[geomIndex] : ''
-      const coords = this.extractPolygonWktPoints(geom)
+      const fid = this.extractAttribute(block, 'fid')
+      const gid = this.extractTagText(block, 'ICA:gid')
+      const ident = this.extractTagText(block, 'ICA:ident').toUpperCase()
+      const nome = this.extractTagText(block, 'ICA:nam')
+      const icaocode = this.extractTagText(block, 'ICA:icaocode').toUpperCase()
+      const tipo = this.extractTagText(block, 'ICA:typ')
+      const relatedfir = this.extractTagText(block, 'ICA:relatedfir').toUpperCase()
+      const geomBlock = this.extractFirstBlock(block, 'ICA:geom')
+      const coords = this.extractGmlCoordinatesFromGeom(geomBlock)
 
-      if (coords.length < 3) {
+      if (!ident || coords.length < 3) {
         continue
       }
 
-      const id =
-        idIndex >= 0
-          ? String(cols[idIndex] ?? '').trim()
-          : `FIR_${i}`
-
-      const ident =
-        identIndex >= 0
-          ? String(cols[identIndex] ?? '').trim()
-          : id
-
-      const nomeRaw =
-        nameIndex >= 0
-          ? String(cols[nameIndex] ?? '').trim()
-          : ''
-
-      const icaocode =
-        icaoIndex >= 0
-          ? String(cols[icaoIndex] ?? '').trim().toUpperCase()
-          : ''
-
-      const relatedfir =
-        relatedFirIndex >= 0
-          ? String(cols[relatedFirIndex] ?? '').trim().toUpperCase()
-          : ''
-
-      const tipo =
-        typeIndex >= 0
-          ? String(cols[typeIndex] ?? '').trim()
-          : ''
-
-      const nome = nomeRaw || ident || icaocode || id
-
       result.push({
-        id,
+        id: fid || gid || ident || `FIR_${i + 1}`,
         ident,
-        nome,
+        nome: nome || ident,
         icaocode,
         relatedfir,
         tipo,
@@ -111,70 +71,72 @@ export class FirService {
     return result
   }
 
-  private splitCsvRow(row: string): string[] {
-    const result: string[] = []
-    let current = ''
-    let inQuotes = false
-
-    for (let i = 0; i < row.length; i++) {
-      const char = row[i]
-
-      if (char === '"') {
-        if (inQuotes && row[i + 1] === '"') {
-          current += '"'
-          i++
-        } else {
-          inQuotes = !inQuotes
-        }
-        continue
-      }
-
-      if (char === ',' && !inQuotes) {
-        result.push(current)
-        current = ''
-        continue
-      }
-
-      current += char
-    }
-
-    result.push(current)
-
-    return result.map((value) => value.trim())
+  private extractBlocks(xml: string, tagName: string): string[] {
+    const escapedTag = this.escapeRegex(tagName)
+    const regex = new RegExp(`<${escapedTag}\\b[^>]*>[\\s\\S]*?<\\/${escapedTag}>`, 'gi')
+    return xml.match(regex) ?? []
   }
 
-  private findColumnIndex(header: string[], candidates: string[]): number {
-    const normalizedHeader = header.map((item) => item.trim().toLowerCase())
-
-    for (const candidate of candidates) {
-      const index = normalizedHeader.indexOf(candidate.toLowerCase())
-      if (index >= 0) {
-        return index
-      }
-    }
-
-    return -1
+  private extractFirstBlock(xml: string, tagName: string): string {
+    const blocks = this.extractBlocks(xml, tagName)
+    return blocks[0] ?? ''
   }
 
-  private extractPolygonWktPoints(wkt: string): LatLon[] {
-    const cleaned = String(wkt ?? '').trim()
+  private extractTagText(xml: string, tagName: string): string {
+    const escapedTag = this.escapeRegex(tagName)
+    const regex = new RegExp(`<${escapedTag}\\b[^>]*>([\\s\\S]*?)<\\/${escapedTag}>`, 'i')
+    const match = xml.match(regex)
 
-    if (!cleaned) {
-      return []
-    }
-
-    const match = cleaned.match(/^POLYGON\s*\(\((.*)\)\)$/i)
     if (!match) {
+      return ''
+    }
+
+    return this.decodeXml(match[1].trim())
+  }
+
+  private extractAttribute(xml: string, attributeName: string): string {
+    const escapedAttribute = this.escapeRegex(attributeName)
+    const regex = new RegExp(`${escapedAttribute}="([^"]*)"`, 'i')
+    const match = xml.match(regex)
+
+    if (!match) {
+      return ''
+    }
+
+    return this.decodeXml(match[1].trim())
+  }
+
+  private extractGmlCoordinatesFromGeom(geomBlock: string): LatLon[] {
+    if (!geomBlock) {
       return []
     }
 
-    const pointsRaw = match[1]
-    const pairs = pointsRaw.split(',')
+    const coordinatesBlocks = this.extractBlocks(geomBlock, 'gml:coordinates')
+    const longestCoordinates = coordinatesBlocks
+      .map((block) => this.extractTagText(block, 'gml:coordinates'))
+      .sort((a, b) => b.length - a.length)[0]
+
+    if (!longestCoordinates) {
+      return []
+    }
+
+    return this.parseGmlCoordinates(longestCoordinates)
+  }
+
+  private parseGmlCoordinates(value: string): LatLon[] {
+    const text = String(value ?? '')
+      .replace(/\s+/g, ' ')
+      .trim()
+
+    if (!text) {
+      return []
+    }
 
     const coords: LatLon[] = []
+    const pairs = text.split(' ')
 
     for (const pair of pairs) {
-      const parts = pair.trim().split(/\s+/)
+      const parts = pair.split(',')
 
       if (parts.length < 2) {
         continue
@@ -211,5 +173,19 @@ export class FirService {
     }
 
     return normalized
+  }
+
+  private decodeXml(value: string): string {
+    return String(value ?? '')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&amp;/g, '&')
+      .trim()
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   }
 }
