@@ -14,10 +14,12 @@ import { FirController } from '../controller/fir.controller'
 import { FirService } from '../service/fir.service'
 import { NavaidsService } from '../service/navaids.service'
 import { NavaidsController } from '../controller/navaids.controller'
+import { SpecialAreasController } from 'src/controller/special-areas.controller'
+import { SpecialAreasService } from 'src/service/special-areas.service'
 
 @Module({
   imports: [ConfigModule],
-  controllers: [NotamsController, NotamReadStateController, ManualRouteController, FirController, NavaidsController],
+  controllers: [NotamsController, NotamReadStateController, ManualRouteController, FirController, NavaidsController, SpecialAreasController],
   providers: [
     NotamsService, 
     EnvService, NotamGeometryService, 
@@ -25,7 +27,8 @@ import { NavaidsController } from '../controller/navaids.controller'
     DatabaseService, 
     ManualRouteService,
     FirService,
-    NavaidsService
+    NavaidsService,
+    SpecialAreasService
   ],
   exports: [NotamsService],
 })
