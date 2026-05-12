@@ -1,6 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common'
-import * as specialAreasModel from 'src/models/notams/special-areas.model'
-import { SpecialAreasService } from 'src/service/special-areas.service'
+import * as specialAreasModel from '../models/notams/special-areas.model'
+import { SpecialAreasService } from '../service/special-areas.service'
 
 
 @Controller('special-areas')
