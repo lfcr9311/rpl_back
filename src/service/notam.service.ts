@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common'
 import { XMLParser } from 'fast-xml-parser'
 import { readFile } from 'node:fs/promises'
 import { EnvService } from '../config/env.service'
+import { DatabaseService } from '../config/database'
 import {
   AeroviaLinhaModel,
   AeroviasResponseModel,
@@ -56,11 +57,36 @@ type ExtractedGeometry =
       radius_m: null
     }
 
+type RplFlightDbRow = {
+  id: string
+  flightNumber: string
+  equipment: string | null
+  startDate: Date | string | null
+  endDate: Date | string | null
+  isMonday: boolean
+  isTuesday: boolean
+  isWednesday: boolean
+  isThursday: boolean
+  isFriday: boolean
+  isSaturday: boolean
+  isSunday: boolean
+  departure: string
+  arrival: string
+  eobt: string | null
+  speed: string | null
+  flightLevel: string | null
+  route: string | null
+  eet: string | null
+  remarks: string | null
+  originalLine: string | null
+}
+
 @Injectable()
 export class NotamsService {
   constructor(
     private readonly envService: EnvService,
     private readonly notamReadStateService: NotamReadStateService,
+    private readonly db: DatabaseService,
   ) {}
 
   private readonly parser = new XMLParser({
@@ -1297,75 +1323,179 @@ export class NotamsService {
 
       const xlsx = await import('xlsx')
       const workbook = xlsx.read(buffer, { type: 'buffer' })
-
       const result = new Map<string, WaypointModel>()
 
       for (const sheetName of workbook.SheetNames) {
         const sheet = workbook.Sheets[sheetName]
         if (!sheet) continue
 
-        const rows = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+        const rows = xlsx.utils.sheet_to_json<unknown[]>(sheet, {
+          header: 1,
           defval: '',
           raw: false,
         })
 
         for (const row of rows) {
-          const ident = this.extractWaypointIdent(row)
-          const latitude = this.extractWaypointLatitude(row)
-          const longitude = this.extractWaypointLongitude(row)
+          const waypoint = this.parseWaypointRow(row)
 
-          if (!ident) continue
-          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) continue
-
-          if (!result.has(ident)) {
-            result.set(ident, {
-              ident,
-              latitude,
-              longitude,
-            })
+          if (!waypoint) continue
+          if (!result.has(waypoint.ident)) {
+            result.set(waypoint.ident, waypoint)
           }
         }
       }
 
-      return Array.from(result.values()).sort((a, b) =>
+      const waypoints = Array.from(result.values()).sort((a, b) =>
         a.ident.localeCompare(b.ident),
       )
+
+      console.log(`[WAYPOINTS] Total carregado: ${waypoints.length}`)
+
+      return waypoints
     })
   }
 
-  async importRpl(): Promise<RotaRplModel[]> {
-    return this.withFallback('RPL_URL', [], async () => {
-      const [text, aeroportos, waypoints] = await Promise.all([
-        this.fetchText(this.envService.rplUrl),
-        this.importAeroportos(),
-        this.importWaypoints(),
-      ])
+async importRpl(): Promise<RotaRplModel[]> {
+  return this.withFallback('RPL_DATABASE', [], async () => {
+    const [aeroportos, waypoints, dbResult] = await Promise.all([
+      this.importAeroportos(),
+      this.importWaypoints(),
+      this.db.query<RplFlightDbRow>(
+        `
+          SELECT
+            id,
+            flight_number AS "flightNumber",
+            equipment,
+            start_date AS "startDate",
+            end_date AS "endDate",
+            is_monday AS "isMonday",
+            is_tuesday AS "isTuesday",
+            is_wednesday AS "isWednesday",
+            is_thursday AS "isThursday",
+            is_friday AS "isFriday",
+            is_saturday AS "isSaturday",
+            is_sunday AS "isSunday",
+            departure,
+            arrival,
+            eobt,
+            speed,
+            flight_level AS "flightLevel",
+            route,
+            eet,
+            remarks,
+            original_line AS "originalLine"
+          FROM rpl_flight
+          ORDER BY flight_number, departure, arrival, eobt
+        `,
+      ),
+    ])
 
-      if (!text.trim()) {
-        return []
+    const airportMap = new Map<string, AeroportoModel>(
+      aeroportos.map((airport): [string, AeroportoModel] => [
+        this.normalizeIdent(airport.icao),
+        airport,
+      ]),
+    )
+
+    const waypointMap = new Map<string, WaypointModel>(
+      waypoints.map((waypoint): [string, WaypointModel] => [
+        this.normalizeIdent(waypoint.ident),
+        waypoint,
+      ]),
+    )
+
+    const result: RotaRplModel[] = []
+
+    for (const row of dbResult.rows) {
+      const rota = this.parseRplDbRow(row, airportMap, waypointMap)
+
+      if (rota && rota.coords_latlon.length >= 2) {
+        result.push(rota)
       }
+    }
 
-      const airportMap = new Map(
-        aeroportos.map((a) => [this.normalizeIdent(a.icao), a]),
-      )
+    console.log(`[RPL] Rotas carregadas do banco: ${result.length}`)
 
-      const waypointMap = new Map(
-        waypoints.map((w) => [this.normalizeIdent(w.ident), w]),
-      )
+    return result
+  })
+}
 
-      const registros = this.parseRplRecords(text)
-      const result: RotaRplModel[] = []
+private parseRplDbRow(
+  row: RplFlightDbRow,
+  airportMap: Map<string, AeroportoModel>,
+  waypointMap: Map<string, WaypointModel>,
+): RotaRplModel | null {
+  const ident = this.normalizeIdent(row.flightNumber)
+  const tipoAnv = this.cleanAircraftType(row.equipment ?? '')
+  const origem = this.normalizeIdent(row.departure)
+  const destino = this.normalizeIdent(row.arrival)
+  const eobt = this.normalizeTime(row.eobt ?? '')
+  const velocidade = this.normalizeIdent(row.speed ?? '')
+  const nivel = this.extractFlightLevel(row.flightLevel ?? '')
+  const rotaTextoOriginal = String(row.route ?? '').trim()
+  const eet = this.normalizeTime(row.eet ?? '')
 
-      for (const registro of registros) {
-        const rota = this.parseRplRecord(registro, airportMap, waypointMap)
-        if (rota && rota.coords_latlon.length >= 2) {
-          result.push(rota)
-        }
-      }
+  if (!ident) return null
+  if (!origem) return null
+  if (!destino) return null
+  if (!/^[A-Z]{4}$/.test(origem)) return null
+  if (!/^[A-Z]{4}$/.test(destino)) return null
 
-      return result
-    })
+  const rotaTokens = this.cleanupRouteTokens(
+    rotaTextoOriginal.split(/\s+/).filter(Boolean),
+  )
+
+  const pontos = this.resolveRoutePoints(
+    origem,
+    rotaTokens,
+    destino,
+    airportMap,
+    waypointMap,
+  )
+
+  const coords = pontos.map((point) => [point.latitude, point.longitude] as LatLon)
+
+  if (coords.length < 2) {
+    return null
   }
+
+  const totalDistanceNm = this.calculateTotalDistanceNm(coords)
+  const eetMinutes = this.parseElapsedTimeToMinutes(row.eet ?? '')
+  const speedKt = this.parseSpeedKt(velocidade)
+
+  const totalFlightMinutes =
+    eetMinutes > 0
+      ? eetMinutes
+      : speedKt > 0 && totalDistanceNm > 0
+        ? Math.round((totalDistanceNm / speedKt) * 60)
+        : 0
+
+  const estimados = this.buildEstimatedPoints(
+    pontos,
+    eobt,
+    totalFlightMinutes,
+  )
+
+  const eta =
+    eobt && totalFlightMinutes > 0
+      ? this.addMinutesToHhmm(eobt, totalFlightMinutes)
+      : this.sumHhmm(eobt, eet)
+
+  return {
+    ident,
+    tipo_anv: tipoAnv,
+    nivel_voo: `${velocidade} ${nivel}`.trim(),
+    origem,
+    destino,
+    eobt,
+    eet,
+    eta,
+    rota_texto: rotaTokens.join(' '),
+    linha_original: row.originalLine ?? '',
+    coords_latlon: coords,
+    estimados,
+  }
+}
 
   private async fetchJson<T>(url: string): Promise<T> {
     if (!url || !/^https?:\/\//i.test(url)) {
@@ -1523,6 +1653,130 @@ export class NotamsService {
     return result
   }
 
+  private parseRplCsvRows(csv: string): string[][] {
+    const lines = csv
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+
+    const rows: string[][] = []
+
+    for (const line of lines) {
+      const cols = this.splitCsvLineByDelimiter(line, ';')
+
+      if (cols.length < 20) {
+        continue
+      }
+
+      rows.push(cols)
+    }
+
+    return rows
+  }
+
+  private splitCsvLineByDelimiter(line: string, delimiter: string): string[] {
+    const result: string[] = []
+    let current = ''
+    let inQuotes = false
+
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i]
+
+      if (char === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"'
+          i++
+        } else {
+          inQuotes = !inQuotes
+        }
+        continue
+      }
+
+      if (char === delimiter && !inQuotes) {
+        result.push(current.trim())
+        current = ''
+        continue
+      }
+
+      current += char
+    }
+
+    result.push(current.trim())
+    return result
+  }
+
+  private parseRplCsvRow(
+    row: string[],
+    airportMap: Map<string, AeroportoModel>,
+    waypointMap: Map<string, WaypointModel>,
+  ): RotaRplModel | null {
+    const ident = this.normalizeIdent(row[10])
+    const tipoAnv = this.cleanAircraftType(row[11] ?? '')
+    const origem = this.normalizeIdent(row[13])
+    const eobt = this.normalizeTime(row[14] ?? '')
+    const velocidade = this.normalizeIdent(row[15])
+    const nivel = this.extractFlightLevel(row[16] ?? '')
+    const rotaTextoOriginal = String(row[17] ?? '').trim()
+    const destino = this.normalizeIdent(row[18])
+    const eet = this.normalizeTime(row[19] ?? '')
+
+    if (!ident) return null
+    if (!origem) return null
+    if (!destino) return null
+    if (!/^[A-Z]{4}$/.test(origem)) return null
+    if (!/^[A-Z]{4}$/.test(destino)) return null
+
+    const rotaTokens = this.cleanupRouteTokens(
+      rotaTextoOriginal.split(/\s+/).filter(Boolean),
+    )
+
+    const pontos = this.resolveRoutePoints(
+      origem,
+      rotaTokens,
+      destino,
+      airportMap,
+      waypointMap,
+    )
+
+    const coords = pontos.map((p) => [p.latitude, p.longitude] as LatLon)
+    const totalDistanceNm = this.calculateTotalDistanceNm(coords)
+    const eetMinutes = this.parseHhmmToMinutes(eet)
+    const speedKt = this.parseSpeedKt(velocidade)
+
+    const totalFlightMinutes =
+      eetMinutes > 0
+        ? eetMinutes
+        : speedKt > 0 && totalDistanceNm > 0
+          ? Math.round((totalDistanceNm / speedKt) * 60)
+          : 0
+
+    const estimados = this.buildEstimatedPoints(
+      pontos,
+      eobt,
+      totalFlightMinutes,
+    )
+
+    const eta =
+      eobt && totalFlightMinutes > 0
+        ? this.addMinutesToHhmm(eobt, totalFlightMinutes)
+        : this.sumHhmm(eobt, eet)
+
+    return {
+      ident,
+      tipo_anv: tipoAnv,
+      nivel_voo: `${velocidade} ${nivel}`.trim(),
+      origem,
+      destino,
+      eobt,
+      eet,
+      eta,
+      rota_texto: rotaTokens.join(' '),
+      linha_original: row.join(';'),
+      coords_latlon: coords,
+      estimados,
+    }
+  }
+
   private parseRplRecords(text: string): string[] {
     const lines = text.split(/\r?\n/)
     const registros: string[] = []
@@ -1611,15 +1865,35 @@ export class NotamsService {
 
     const rotaBruta = partes.slice(rotaInicio, destInfo.index)
     const rotaTokens = this.cleanupRouteTokens(rotaBruta)
-    const coords = this.resolveRouteCoordinates(
+    const pontos = this.resolveRoutePoints(
       adepInfo.icao,
       rotaTokens,
       destInfo.icao,
       airportMap,
       waypointMap,
     )
+    const coords = pontos.map((point) => [point.latitude, point.longitude] as LatLon)
+    const totalDistanceNm = this.calculateTotalDistanceNm(coords)
+    const eetMinutes = this.parseHhmmToMinutes(destInfo.hora)
+    const speedKt = this.parseSpeedKt(velocidade)
 
-    const eta = this.sumHhmm(adepInfo.hora, destInfo.hora)
+    const totalFlightMinutes =
+      eetMinutes > 0
+        ? eetMinutes
+        : speedKt > 0 && totalDistanceNm > 0
+          ? Math.round((totalDistanceNm / speedKt) * 60)
+          : 0
+
+    const estimados = this.buildEstimatedPoints(
+      pontos,
+      adepInfo.hora,
+      totalFlightMinutes,
+    )
+
+    const eta =
+      totalFlightMinutes > 0
+        ? this.addMinutesToHhmm(adepInfo.hora, totalFlightMinutes)
+        : this.sumHhmm(adepInfo.hora, destInfo.hora)
 
     return {
       ident: identInfo.ident,
@@ -1633,6 +1907,7 @@ export class NotamsService {
       rota_texto: rotaTokens.join(' '),
       linha_original: registro,
       coords_latlon: coords,
+      estimados,
     }
   }
 
@@ -1674,6 +1949,306 @@ export class NotamsService {
     }
 
     return coords
+  }
+
+  private resolveRoutePoints(
+    origem: string,
+    rotaTokens: string[],
+    destino: string,
+    airportMap: Map<string, AeroportoModel>,
+    waypointMap: Map<string, WaypointModel>,
+  ): Array<{
+    ident: string
+    latitude: number
+    longitude: number
+  }> {
+    const sequence = this.buildRoutePointSequence(
+      origem,
+      rotaTokens,
+      destino,
+      airportMap,
+      waypointMap,
+    )
+
+    const points: Array<{
+      ident: string
+      latitude: number
+      longitude: number
+    }> = []
+    const seen = new Set<string>()
+
+    for (const ident of sequence) {
+      const airport = airportMap.get(ident)
+      if (airport) {
+        this.pushUniqueRoutePoint(points, seen, {
+          ident,
+          latitude: airport.latitude,
+          longitude: airport.longitude,
+        })
+        continue
+      }
+
+      const waypoint = waypointMap.get(ident)
+      if (waypoint) {
+        this.pushUniqueRoutePoint(points, seen, {
+          ident,
+          latitude: waypoint.latitude,
+          longitude: waypoint.longitude,
+        })
+      }
+    }
+
+    return points
+  }
+
+  private pushUniqueRoutePoint(
+    points: Array<{
+      ident: string
+      latitude: number
+      longitude: number
+    }>,
+    seen: Set<string>,
+    point: {
+      ident: string
+      latitude: number
+      longitude: number
+    },
+  ) {
+    if (!point.ident) return
+    if (!Number.isFinite(point.latitude)) return
+    if (!Number.isFinite(point.longitude)) return
+
+    const key = `${point.ident}:${point.latitude.toFixed(6)},${point.longitude.toFixed(6)}`
+    if (seen.has(key)) return
+
+    seen.add(key)
+    points.push(point)
+  }
+
+private buildEstimatedPoints(
+  points: Array<{
+    ident: string
+    latitude: number
+    longitude: number
+  }>,
+  eobt: string,
+  totalFlightMinutes: number,
+): Array<{
+  ident: string
+  latitude: number
+  longitude: number
+  distancia_acumulada_nm: number
+  tempo_acumulado_min: number
+  estimado: string
+}> {
+  if (!points.length) {
+    return []
+  }
+
+  const distances: number[] = [0]
+  let totalDistanceNm = 0
+
+  for (let i = 1; i < points.length; i++) {
+    const previous = points[i - 1]
+    const current = points[i]
+
+    const legDistanceNm = this.distanceNm(
+      [previous.latitude, previous.longitude],
+      [current.latitude, current.longitude],
+    )
+
+    totalDistanceNm += legDistanceNm
+    distances.push(totalDistanceNm)
+  }
+
+  return points.map((point, index) => {
+    const accumulatedDistance = distances[index] ?? 0
+
+    const accumulatedMinutes =
+      index === 0
+        ? 0
+        : totalDistanceNm > 0 && totalFlightMinutes > 0
+          ? Math.round((accumulatedDistance / totalDistanceNm) * totalFlightMinutes)
+          : 0
+
+    return {
+      ident: point.ident,
+      latitude: point.latitude,
+      longitude: point.longitude,
+      distancia_acumulada_nm: Number(accumulatedDistance.toFixed(1)),
+      tempo_acumulado_min: accumulatedMinutes,
+      estimado: eobt ? this.addMinutesToHhmm(eobt, accumulatedMinutes) : '',
+    }
+  })
+}
+
+  private calculateTotalDistanceNm(coords: LatLon[]): number {
+    let total = 0
+
+    for (let i = 1; i < coords.length; i++) {
+      total += this.distanceNm(coords[i - 1], coords[i])
+    }
+
+    return total
+  }
+
+  private distanceNm(from: LatLon, to: LatLon): number {
+    const lat1 = this.toRadians(from[0])
+    const lon1 = this.toRadians(from[1])
+    const lat2 = this.toRadians(to[0])
+    const lon2 = this.toRadians(to[1])
+
+    const dLat = lat2 - lat1
+    const dLon = lon2 - lon1
+
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1) *
+        Math.cos(lat2) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2)
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    const meters = this.EARTH_RADIUS_M * c
+
+    return meters / this.NM_TO_M
+  }
+
+  private normalizeTime(value: string): string {
+    const text = String(value ?? '').trim()
+    if (!text) return ''
+
+    const onlyDigits = text.replace(/\D/g, '')
+
+    if (/^\d{4}$/.test(onlyDigits)) return onlyDigits
+    if (/^\d{3}$/.test(onlyDigits)) return `0${onlyDigits}`
+    if (/^\d{1,2}$/.test(onlyDigits)) return onlyDigits.padStart(4, '0')
+
+    return text
+  }
+
+private parseElapsedTimeToMinutes(value: string): number {
+  const raw = String(value ?? '').trim().toUpperCase()
+
+  if (!raw) {
+    return 0
+  }
+
+  const cleaned = raw
+    .replace(/UTC/g, '')
+    .replace(/Z/g, '')
+    .replace(/\s+/g, '')
+    .replace(',', '.')
+    .trim()
+
+  const colonMatch = cleaned.match(/^(\d{1,2}):(\d{2})$/)
+  if (colonMatch) {
+    const hours = Number(colonMatch[1])
+    const minutes = Number(colonMatch[2])
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0
+    if (minutes < 0 || minutes > 59) return 0
+
+    return hours * 60 + minutes
+  }
+
+  const hMatch = cleaned.match(/^(\d{1,2})H(\d{0,2})?M?$/)
+  if (hMatch) {
+    const hours = Number(hMatch[1])
+    const minutes = hMatch[2] ? Number(hMatch[2]) : 0
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0
+    if (minutes < 0 || minutes > 59) return 0
+
+    return hours * 60 + minutes
+  }
+
+  const dotMatch = cleaned.match(/^(\d{1,2})\.(\d{2})$/)
+  if (dotMatch) {
+    const hours = Number(dotMatch[1])
+    const minutes = Number(dotMatch[2])
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0
+    if (minutes < 0 || minutes > 59) return 0
+
+    return hours * 60 + minutes
+  }
+
+  const digits = cleaned.replace(/\D/g, '')
+
+  if (!digits) {
+    return 0
+  }
+
+  if (digits.length <= 2) {
+    return Number(digits)
+  }
+
+  if (digits.length === 3) {
+    const hours = Number(digits.slice(0, 1))
+    const minutes = Number(digits.slice(1, 3))
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0
+    if (minutes < 0 || minutes > 59) return 0
+
+    return hours * 60 + minutes
+  }
+
+  if (digits.length === 4) {
+    const hours = Number(digits.slice(0, 2))
+    const minutes = Number(digits.slice(2, 4))
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0
+    if (minutes < 0 || minutes > 59) return 0
+
+    return hours * 60 + minutes
+  }
+
+  return 0
+}
+
+  private parseHhmmToMinutes(value: string): number {
+    const text = this.normalizeTime(value)
+
+    if (!/^\d{4}$/.test(text)) {
+      return 0
+    }
+
+    const hours = Number(text.slice(0, 2))
+    const minutes = Number(text.slice(2, 4))
+
+    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 0
+    if (minutes < 0 || minutes > 59) return 0
+
+    return hours * 60 + minutes
+  }
+
+  private addMinutesToHhmm(value: string, minutesToAdd: number): string {
+    const normalized = this.normalizeTime(value)
+
+    if (!/^\d{4}$/.test(normalized)) {
+      return ''
+    }
+
+    const base = this.parseHhmmToMinutes(normalized)
+    const total = ((base + minutesToAdd) % 1440 + 1440) % 1440
+    const hours = Math.floor(total / 60)
+    const minutes = total % 60
+
+    return `${String(hours).padStart(2, '0')}${String(minutes).padStart(2, '0')}`
+  }
+
+  private parseSpeedKt(value: string): number {
+    const text = String(value ?? '').trim().toUpperCase()
+    if (!text) return 0
+
+    const nMatch = text.match(/^N(\d{4})$/)
+    if (nMatch) return Number(nMatch[1])
+
+    const plain = text.match(/^(\d{3,4})$/)
+    if (plain) return Number(plain[1])
+
+    return 0
   }
 
   private buildRoutePointSequence(
@@ -1905,78 +2480,81 @@ export class NotamsService {
     return `${String(hh).padStart(2, '0')}${String(mm).padStart(2, '0')}`
   }
 
-  private extractWaypointIdent(row: Record<string, unknown>): string {
-    const candidates = [
-      row.ident,
-      row.Ident,
-      row.IDENT,
-      row.waypoint,
-      row.WAYPOINT,
-      row.nome,
-      row.NOME,
-      row.name,
-      row.NAME,
-      row.fix,
-      row.FIX,
-    ]
+  private parseWaypointRow(row: unknown[]): WaypointModel | null {
+    if (!Array.isArray(row) || row.length < 3) {
+      return null
+    }
 
-    for (const value of candidates) {
-      const ident = this.normalizeIdent(String(value ?? ''))
-      if (ident) {
-        return ident
+    const ident = this.extractWaypointIdentFromArray(row)
+    const coordinate = this.extractWaypointCoordinateFromArray(row)
+
+    if (!ident) return null
+    if (!coordinate) return null
+
+    return {
+      ident,
+      latitude: coordinate[0],
+      longitude: coordinate[1],
+    }
+  }
+
+  private extractWaypointIdentFromArray(row: unknown[]): string {
+    for (const value of row) {
+      const text = this.normalizeIdent(String(value ?? ''))
+
+      if (/^[A-Z]{5}$/.test(text)) {
+        return text
       }
     }
 
     return ''
   }
 
-  private extractWaypointLatitude(row: Record<string, unknown>): number {
-    const candidates = [
-      row.latitude,
-      row.LATITUDE,
-      row.lat,
-      row.LAT,
-      row.latitude_deg,
-      row.LATITUDE_DEG,
-      row.y,
-      row.Y,
-    ]
+  private extractWaypointCoordinateFromArray(row: unknown[]): LatLon | null {
+    const numericCoords: number[] = []
+    const dmsLat: number[] = []
+    const dmsLon: number[] = []
 
-    for (const value of candidates) {
-      const parsed = this.parseCoordinateValue(value)
-      if (Number.isFinite(parsed)) {
-        return parsed
+    for (const value of row) {
+      const text = String(value ?? '').trim()
+      if (!text) continue
+
+      const dms = this.parseSingleDmsCoordinate(text)
+      if (Number.isFinite(dms)) {
+        if (/[NS]/i.test(text)) {
+          dmsLat.push(dms)
+        }
+        if (/[EW]/i.test(text)) {
+          dmsLon.push(dms)
+        }
+        continue
+      }
+
+      const numeric = this.parseDecimalCoordinate(text)
+      if (Number.isFinite(numeric)) {
+        numericCoords.push(numeric)
       }
     }
 
-    return Number.NaN
-  }
+    if (dmsLat.length && dmsLon.length) {
+      const coord: LatLon = [dmsLat[0], dmsLon[0]]
+      return this.isFiniteCoord(coord) ? coord : null
+    }
 
-  private extractWaypointLongitude(row: Record<string, unknown>): number {
-    const candidates = [
-      row.longitude,
-      row.LONGITUDE,
-      row.lon,
-      row.LON,
-      row.lng,
-      row.LNG,
-      row.longitude_deg,
-      row.LONGITUDE_DEG,
-      row.x,
-      row.X,
-    ]
+    for (let i = 0; i < numericCoords.length - 1; i++) {
+      const lat = numericCoords[i]
+      const lon = numericCoords[i + 1]
+      const coord: LatLon = [lat, lon]
 
-    for (const value of candidates) {
-      const parsed = this.parseCoordinateValue(value)
-      if (Number.isFinite(parsed)) {
-        return parsed
+      if (this.isFiniteCoord(coord)) {
+        return coord
       }
     }
 
-    return Number.NaN
+    return null
   }
 
-  private parseCoordinateValue(value: unknown): number {
+  private parseDecimalCoordinate(value: unknown): number {
     if (typeof value === 'number') {
       return Number.isFinite(value) ? value : Number.NaN
     }
@@ -1984,21 +2562,41 @@ export class NotamsService {
     const text = String(value ?? '').trim()
     if (!text) return Number.NaN
 
-    const direct = Number(text.replace(',', '.'))
-    if (Number.isFinite(direct)) {
-      return direct
+    if (/[°'"NSWE]/i.test(text)) {
+      return Number.NaN
     }
 
-    const dms = this.parseCompactDmsToken(text)
-    if (dms) {
-      if (/[NS]/i.test(text) && !/[EW]/i.test(text)) {
-        return dms[0]
-      }
-      if (/[EW]/i.test(text) && !/[NS]/i.test(text)) {
-        return dms[1]
-      }
+    const normalized = text.replace(',', '.')
+    const parsed = Number(normalized)
+
+    if (!Number.isFinite(parsed)) {
+      return Number.NaN
     }
 
-    return Number.NaN
+    if (Math.abs(parsed) > 180) {
+      return Number.NaN
+    }
+
+    return parsed
   }
+
+  private parseSingleDmsCoordinate(value: unknown): number {
+    const text = String(value ?? '').trim().toUpperCase()
+    if (!text) return Number.NaN
+
+    const match = text.match(/^(\d{1,3})\D+(\d{1,2})\D+(\d{1,2}(?:[.,]\d+)?)\D*([NSWE])$/)
+    if (!match) return Number.NaN
+
+    const deg = Number(match[1])
+    const min = Number(match[2])
+    const sec = Number(match[3].replace(',', '.'))
+    const hemi = match[4]
+
+    if (!Number.isFinite(deg)) return Number.NaN
+    if (!Number.isFinite(min)) return Number.NaN
+    if (!Number.isFinite(sec)) return Number.NaN
+
+    return this.dmsToDecimal(deg, min, sec, hemi)
+  }
+
 }

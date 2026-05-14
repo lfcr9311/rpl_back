@@ -26,7 +26,6 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       const client = await this.pool.connect()
       this.logger.log('Conexão com banco OK')
 
-      // Teste simples
       await client.query('SELECT 1')
       this.logger.log('Query básica OK')
 
@@ -36,13 +35,13 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         WHERE table_schema = 'public'
       `)
 
-      const tables = result.rows.map((r) => r.table_name)
+      const tables = result.rows.map((row) => row.table_name)
 
       this.logger.log(`Tabelas encontradas: ${tables.join(', ') || 'nenhuma'}`)
       client.release()
-    } catch (err) {
-      this.logger.error('Erro ao conectar ou validar migração', err)
-      throw err
+    } catch (error) {
+      this.logger.error('Erro ao conectar ou validar migração', error)
+      throw error
     }
   }
 

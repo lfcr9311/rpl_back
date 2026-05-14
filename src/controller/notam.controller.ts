@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Post, Query } from '@nestjs/common'
-import { NotamsService } from '../service/notam.service'
 import { NotamReadStateService } from '../service/notam-read-state.service'
+import { NotamsService } from '../service/notam.service'
 
 type SetReadStateBody = {
   sourceId?: string | null
@@ -32,7 +32,6 @@ export class NotamsController {
 
   @Get('health')
   health() {
-    console.log('Health check')
     return { ok: true }
   }
 
@@ -99,7 +98,7 @@ export class NotamsController {
   }
 
   @Get('read-states')
-  getReadStates(@Query('fir') fir?: string) {
+  getReadStates() {
     return this.notamReadStateService.buildReadStateMap()
   }
 

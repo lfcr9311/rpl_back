@@ -49,10 +49,13 @@ export interface AreaNotamApiModel {
   q_line: string
   coords_latlon: LatLon[]
   texto_notam: string
+  f?: string
+  g?: string
   source_id?: string
   geometry_type?: 'POLYGON' | 'CIRCLE'
   center?: LatLon | null
   radius_m?: number | null
+  lido?: boolean
 }
 
 export interface AeroportoModel {
@@ -67,6 +70,15 @@ export interface WaypointModel {
   longitude: number
 }
 
+export interface RotaPontoEstimadoModel {
+  ident: string
+  latitude: number
+  longitude: number
+  distancia_acumulada_nm: number
+  tempo_acumulado_min: number
+  estimado: string
+}
+
 export interface RotaRplModel {
   ident: string
   tipo_anv: string
@@ -79,6 +91,7 @@ export interface RotaRplModel {
   rota_texto: string
   linha_original: string
   coords_latlon: LatLon[]
+  estimados: RotaPontoEstimadoModel[]
 }
 
 export interface AeroviaLinhaModel {
