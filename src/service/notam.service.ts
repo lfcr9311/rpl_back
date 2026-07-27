@@ -198,8 +198,11 @@ export class NotamsService {
       return false
     }
 
-    if (validFrom && now < validFrom) {
-      return false
+    if (validFrom) {
+      const validFromWithAdvance = new Date(validFrom.getTime() - 7 * 24 * 60 * 60 * 1000)
+      if (now < validFromWithAdvance) {
+        return false
+      }
     }
 
     if (validTo && now > validTo) {
